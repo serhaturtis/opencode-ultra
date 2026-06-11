@@ -1,0 +1,40 @@
+/**
+ * MockSdkClient — test double for ISdkClient.
+ *
+ * Returns predefined responses configured per test case. Tracks all calls for
+ * assertion. promptSession returns an AgentRun ({ text, cost, tokens }); tests
+ * override it to supply specific text/usage.
+ */
+import { type AgentRun, type ISdkClient } from "../../src/sdk-client"
+
+export interface MockCall {
+  method: string
+  args: unknown[]
+}
+
+export function createMockSdk(): { sdk: ISdkClient; calls: MockCall[] } {
+  const calls: MockCall[] = []
+
+  const sdk: ISdkClient = {
+    async createSession(parentId, title, directory) {
+      calls.push({ method: "createSession", args: [parentId, title, directory] })
+      return `session-${calls.length}`
+    },
+
+    async promptSession(sessionId, options): Promise<AgentRun> {
+      calls.push({ method: "promptSession", args: [sessionId, options] })
+      return { text: "mock response text", cost: 0, tokens: 0 }
+    },
+
+    async deleteSession(sessionId) {
+      calls.push({ method: "deleteSession", args: [sessionId] })
+    },
+
+    async listAgents() {
+      calls.push({ method: "listAgents", args: [] })
+      return ["build", "plan", "general", "explore", "title"]
+    },
+  }
+
+  return { sdk, calls }
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Audit findings report (one per scope/agent)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "summary"],
+  "properties": {
+    "scope": { "type": "string", "description": "scope key, e.g. deploy-pipeline" },
+    "summary": { "type": "string", "description": "3-6 sentence narrative: what was checked, overall posture" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "severity", "blocking", "file", "evidence", "rationale", "confidence"],
+        "properties": {
+          "title": { "type": "string" },
+          "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+          "blocking": { "type": "boolean", "description": "must close before the milestone named in the audit charter" },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "evidence": { "type": "string", "description": "command(s) actually run + relevant output excerpt / grep hit / diff hunk" },
+          "rationale": { "type": "string", "description": "why it matters for this milestone" },
+          "fix_sketch": { "type": "string" },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "also_reported_by": { "type": "string", "description": "filled at dedup time" }
+        }
+      }
+    }
+  }
+}

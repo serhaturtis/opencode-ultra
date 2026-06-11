@@ -1,0 +1,10 @@
+node_modules/
+dist/
+
+# opencode's runtime/project config. The plugin's *source* assets live in the
+# top-level command/ skills/ agent/ dirs and are copied INTO a user's config on
+# install — this repo must never carry a .opencode/ of its own.
+.opencode/
+
+# scratch
+*.tar.gz
