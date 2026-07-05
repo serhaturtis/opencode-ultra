@@ -1,8 +1,4 @@
-/**
- * Contracts — pure type definitions with zero runtime dependencies.
- * Every module in opencode-ultra depends only on these contracts.
- * No module imports implementation details from another module.
- */
+/** Pure type definitions. Zero runtime dependencies. */
 
 // ── Auto Mode ───────────────────────────────────────────────────────────────
 
@@ -25,6 +21,15 @@ export interface Stage1Rule {
   readonly pattern: RegExp
   readonly verdict: Stage1Verdict
 }
+
+// ── Shared types ──────────────────────────────────────────────────────────────
+
+export interface ModelId { readonly providerID: string; readonly modelID: string }
+
+export const AGENT_TYPES = ["general", "explore"] as const
+export type AgentType = typeof AGENT_TYPES[number]
+
+export interface VerdictData { readonly refuted: boolean; readonly reason: string }
 
 export interface Stage2Classification {
   readonly verdict: ClassifierVerdict
@@ -64,10 +69,7 @@ export interface VerdictCache {
 }
 
 /** Model override for the Stage 2 classifier. */
-export interface ClassifierModel {
-  readonly providerID: string
-  readonly modelID: string
-}
+export type ClassifierModel = ModelId
 
 export interface CompiledClassifierConfig {
   /** Explicit small/cheap model for classification. When undefined, the classifier agent's model is used. */
@@ -110,7 +112,7 @@ export interface AutoModeState {
   totalDenials: number
   /** The most recent user message text, captured by messages.transform. */
   lastUserMessage: string
-  /** Standing user constraints captured this session ("don't push", "wait for review"). */
+  /** Standing user constraints captured this session (push/capture/clear in place). */
   readonly boundaries: string[]
   /** Resolved-verdict cache (per session). */
   readonly verdicts: VerdictCache
@@ -129,8 +131,17 @@ export interface UltracodeConfig {
     readonly workflowTimeout: number
     /** Per-workflow USD budget; 0 = unlimited. The engine stops spawning when projected spend exceeds it. */
     readonly maxCostUsd: number
+    /**
+     * Conservative per-agent cost cap used to RESERVE budget when an agent starts
+     * (before its real cost is known). Without it, a concurrent first wave can
+     * overshoot maxCostUsd by (maxConcurrent−1)× before any agent records. 0 = no
+     * reservation (spent-only enforcement; fine when maxCostUsd is also 0/unlimited).
+     */
+    readonly agentCostCapUsd: number
     /** Retries for an agent whose prompt throws (transient errors); schema failures are not retried. */
     readonly agentRetries: number
+    /** Max journal files retained for resume; older files are garbage-collected. */
+    readonly maxJournalFiles: number
   }
   readonly summarization: {
     readonly agentResultMaxChars: number
@@ -147,8 +158,6 @@ export interface UltracodeState {
 }
 
 // ── Workflow IR (declarative; no code execution) ──────────────────────────────
-
-export type AgentType = "general" | "explore"
 
 /** A field in a structured-output schema. */
 export type OutputFieldSpec =
@@ -285,6 +294,7 @@ export type AgentRunStatus = "queued" | "running" | "completed" | "error"
 export interface AgentProgress {
   readonly stage: string
   readonly name: string
+  /** Mutable — updated live by the executor's track() closure as agent status changes. */
   status: AgentRunStatus
 }
 
@@ -300,16 +310,43 @@ export type WorkflowStatus = "pending" | "running" | "completed" | "error" | "ca
 
 /** Cooperative controls polled by the engine so pause/stop/timeout actually take effect. */
 export interface WorkflowControl {
-  shouldStop?: () => boolean
-  isPaused?: () => boolean
+  readonly shouldStop?: () => boolean
+  readonly isPaused?: () => boolean
   /** Returns the current time in ms; when omitted, the workflow timeout is not enforced. */
-  now?: () => number
+  readonly now?: () => number
+}
+
+/** Reclamation handle for in-flight worktree isolation (dispose / session deletion). */
+export interface WorktreeReclaimer {
+  /** Best-effort cleanup of every active isolation session. Never throws. */
+  cleanupAllActive(log?: (message: string) => void): Promise<void>
+}
+
+/** Fire-and-forget progress narration. The executor surfaces stage lines through it. */
+export interface NarrationSink {
+  inject(message: string): void
+}
+
+/**
+ * Structured observability. Emits events the plugin's host can consume
+ * (the opencode server log, forwarded to monitoring). All methods are
+ * fire-and-forget — never throw, never block the execution path.
+ */
+export interface Metrics {
+  agentCompleted(agent: AgentResult, stage: string): void
+  agentFailed(agent: AgentResult, stage: string): void
+  stageCompleted(result: StageResult, durationMs: number): void
+  workflowCompleted(def: WorkflowDef, report: BudgetReport, durationMs: number): void
+  autoClassification(verdict: string, tool: string, source: "stage1" | "stage2", durationMs: number): void
+  autoDenied(tool: string, reason: string): void
 }
 
 export interface WorkflowJob {
   readonly id: string
   readonly title: string
   readonly def: WorkflowDef
+  /** The session that spawned this workflow; used to cancel orphans on session.deleted. */
+  readonly parentSessionId: string
   status: WorkflowStatus
   readonly progress: WorkflowProgress
   /** Final summarized output, populated once execution completes. */
@@ -326,7 +363,12 @@ export interface WorkflowJob {
 export interface WorkflowState {
   readonly jobs: Map<string, WorkflowJob>
   readonly completedJobs: WorkflowJob[]
-  shutdown(): void
+  /** Reclamation handle for isolate worktrees (plugin teardown / session deletion). */
+  readonly worktrees?: WorktreeReclaimer
+  /** Stop every job, reclaim worktrees. Called once on plugin dispose. */
+  shutdown(log?: (message: string) => void): Promise<void>
+  /** Cancel every in-flight job spawned by `sessionId`; returns the ids stopped. */
+  stopForSession(sessionId: string): readonly string[]
 }
 
 // ── Plugin State ─────────────────────────────────────────────────────────────
@@ -335,6 +377,8 @@ export interface WorkflowState {
 export interface SessionState {
   readonly autoMode: AutoModeState
   readonly ultracode: UltracodeState
+  /** Session creation time (ms). Used by the session store for TTL eviction. */
+  readonly createdAt: number
 }
 
 /** Owns per-session state, keyed by sessionID. */
@@ -392,7 +436,9 @@ export interface RawUltracodeConfig {
     agentTimeout?: number
     workflowTimeout?: number
     maxCostUsd?: number
+    agentCostCapUsd?: number
     agentRetries?: number
+    maxJournalFiles?: number
   }
   summarization?: {
     agentResultMaxChars?: number

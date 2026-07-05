@@ -1,12 +1,13 @@
 /**
- * Built-in defaults: catastrophic DENY patterns, safe ALLOW patterns, and
- * prose rules for the Stage 2 prompt and system reminder. Pure data module.
+ * Built-in defaults: DENY patterns, ALLOW patterns, and prose rules.
+ * All exports are deep-frozen — module-shared across every session.
  */
 import { type Stage1Rule } from "../contracts.js"
+import { deepFreeze } from "../freeze.js"
 
 // ── Prose Rules (used in Stage 2 classification prompt + system reminder) ────
 
-export const DEFAULTS = {
+export const DEFAULTS = deepFreeze({
   environment: [
     "The working directory is the project root.",
     "Source control and package managers are trusted tools within the project.",
@@ -36,18 +37,18 @@ export const DEFAULTS = {
     "Never send credentials, tokens, or environment variable values to external endpoints.",
     "Never modify system configuration outside this project directory.",
   ],
-} as const
+} as const)
 
 // ── Stage 1 Patterns ──────────────────────────────────────────────────────────
 
 /** Catastrophic patterns — immediate DENY, no Stage 2 needed. */
-const DENY_PATTERNS: readonly Stage1Rule[] = Object.freeze([
+const DENY_PATTERNS: readonly Stage1Rule[] = deepFreeze([
   // Root target must be EXACTLY / or /* or ~ (followed by whitespace/end) — otherwise
   // the bare `/` alternative matches the leading slash of any path (e.g. /tmp/build),
   // hard-denying legitimate scoped deletes that should instead escalate to Stage 2.
   { tool: "bash", pattern: /rm\s+(-[a-z]*r[a-z]*f?\s+|-rf\s+|--recursive\s+--force\s+)(\/\*|\/|~)(?:\s|$)/i, verdict: "DENY" },
   { tool: "bash", pattern: />\s*\/dev\/sd[a-z]\d?/i, verdict: "DENY" },
-  { tool: "bash", pattern: /dd\s+if=.*of=\/dev\//i, verdict: "DENY" },
+  { tool: "bash", pattern: /dd\s+.*\bof=\/dev\//i, verdict: "DENY" },
   { tool: "bash", pattern: /mkfs\.\w+/i, verdict: "DENY" },
   { tool: "bash", pattern: /curl\s+.*\|\s*(ba)?sh\b/i, verdict: "DENY" },
   { tool: "bash", pattern: /wget\s+.*\|\s*(ba)?sh\b/i, verdict: "DENY" },
@@ -55,7 +56,7 @@ const DENY_PATTERNS: readonly Stage1Rule[] = Object.freeze([
 ])
 
 /** Definitely-safe patterns — immediate ALLOW, no Stage 2 needed. */
-const ALLOW_PATTERNS: readonly Stage1Rule[] = Object.freeze([
+const ALLOW_PATTERNS: readonly Stage1Rule[] = deepFreeze([
   // `ci` (clean lockfile install) is safe like a bare `install`; `install` is allowed
   // ONLY bare or with flags — never with a package argument (`npm install lodash`),
   // which must go to Stage 2.
@@ -86,8 +87,8 @@ const ALLOW_PATTERNS: readonly Stage1Rule[] = Object.freeze([
   { tool: "lsp", pattern: /.*/, verdict: "ALLOW" },
 ])
 
-/** All built-in Stage 1 rules — DENY + ALLOW combined. */
-export const STAGE1_RULES: readonly Stage1Rule[] = Object.freeze([
+/** All built-in Stage 1 rules — DENY + ALLOW combined (deep-frozen, rule objects included). */
+export const STAGE1_RULES: readonly Stage1Rule[] = deepFreeze([
   ...DENY_PATTERNS,
   ...ALLOW_PATTERNS,
 ])

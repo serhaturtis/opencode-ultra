@@ -133,12 +133,19 @@ function escapeRe(s: string): string {
 
 // ── Stage 2 prompt text ──────────────────────────────────────────────────────
 
-export function compileStage2Prompt(config: AutoModeConfig): string {
+function compileStage2Prompt(config: AutoModeConfig): string {
   const lines: string[] = []
 
   if (config.environment.length > 0) {
     lines.push("Project environment:")
     for (const rule of config.environment) lines.push(`- ${rule}`)
+    lines.push("")
+  }
+
+  // AM-02: allow rules were dead config — surface them in the Stage 2 prompt.
+  if (config.allow.length > 0) {
+    lines.push("ALLOWED — these actions are ALWAYS trusted, no hesitation needed:")
+    for (const rule of config.allow) lines.push(`- ${rule}`)
     lines.push("")
   }
 

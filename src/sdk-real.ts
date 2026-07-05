@@ -17,6 +17,15 @@ export function createRealSdkClient(client: OpencodeClient): ISdkClient {
   const c = client as any
 
   return {
+    log(level, message) {
+      // Route to the opencode server log — NEVER console.* (that corrupts the TUI).
+      // Fire-and-forget and fully guarded: logging must never throw or block a hook.
+      try {
+        const r = c.app?.log?.({ body: { service: "opencode-ultra", level, message } })
+        if (r && typeof r.then === "function") r.then(undefined, () => {})
+      } catch { /* swallow — diagnostics must never break the plugin */ }
+    },
+
     async createSession(parentId, title, directory) {
       const res = await c.session.create({
         body: { parentID: parentId || undefined, title },
@@ -56,7 +65,16 @@ export function createRealSdkClient(client: OpencodeClient): ISdkClient {
     },
 
     async deleteSession(sessionId) {
-      await c.session.delete({ path: { id: sessionId } }).catch(() => {})
+      try {
+        await c.session.delete({ path: { id: sessionId } })
+      } catch (err) {
+        // Session deletion failure is surfaced to the server log so it's not
+        // invisibly leaked — but it must never throw, because callers don't
+        // expect a throw and a failed delete is a resource leak, not a workflow
+        // correctness failure.
+        const msg = err instanceof Error ? err.message : String(err)
+        try { c.app?.log?.({ body: { service: "opencode-ultra", level: "warn", message: `session deletion failed for ${sessionId}: ${msg}` } }) } catch {}
+      }
     },
 
     async listAgents() {

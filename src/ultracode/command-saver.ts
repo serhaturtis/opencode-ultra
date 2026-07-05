@@ -4,6 +4,7 @@
  * future sessions.
  */
 import type { WorkflowDef } from "../contracts.js"
+import { slugify } from "../util.js"
 
 /** Save a workflow as a reusable slash command. Returns the command name. */
 export async function saveWorkflowAsCommand(
@@ -11,14 +12,10 @@ export async function saveWorkflowAsCommand(
   commandName: string,
   writeFile: (path: string, content: string) => Promise<void>,
 ): Promise<string> {
-  const name = sanitizeCommandName(commandName || def.title)
+  const name = slugify(commandName || def.title, 50, "workflow")
   const filePath = `.opencode/command/${name}.md`
   await writeFile(filePath, buildCommandMarkdown(name, def))
   return name
-}
-
-function sanitizeCommandName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "workflow"
 }
 
 function buildCommandMarkdown(name: string, def: WorkflowDef): string {

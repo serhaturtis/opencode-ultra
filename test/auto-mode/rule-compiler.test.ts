@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { compileRules } from "../../src/auto-mode/rule-compiler"
-import { DEFAULT_AUTO_MODE_CONFIG } from "../../src/config"
+import { DEFAULT_AUTO_MODE_CONFIG } from "../../src/auto-mode/config"
 import { classify } from "../../src/auto-mode/stage1"
 import type { AutoModeConfig, Stage1Rule } from "../../src/contracts"
 

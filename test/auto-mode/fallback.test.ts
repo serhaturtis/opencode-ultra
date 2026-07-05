@@ -57,13 +57,15 @@ describe("fallback transitions", () => {
     expect(a.totalDenials).toBe(20)
   })
 
-  it("recordApproval resets consecutive and resumes if paused", () => {
+  it("recordApproval resets consecutive and resumes if paused, but keeps the lifetime totalDenials", () => {
     const a = auto()
     a.paused = true; a.totalDenials = 25; a.consecutiveDenials = 2
     recordApproval(a)
     expect(a.consecutiveDenials).toBe(0)
     expect(a.paused).toBe(false)
-    expect(a.totalDenials).toBe(0)
+    // AM-07: totalDenials is a SESSION-LIFETIME circuit breaker, not a per-pause
+    // cycle cap. Resetting it on every resume defeated the maxTotalDenials guard.
+    expect(a.totalDenials).toBe(25)
   })
 
   it("activate resets counters, cache, and boundaries", () => {

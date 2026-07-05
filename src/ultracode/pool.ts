@@ -1,15 +1,15 @@
-/**
- * Bounded-concurrency primitives, shared by every stage kind.
- *
- * `runBounded` runs a worker over items with at most `maxConcurrent` in flight,
- * stopping early when `shouldStop` returns true (unstarted items resolve to
- * undefined — callers filter). `withTimeout` bounds a single agent turn.
- */
+/** Controls polled between items so pause/stop/timeout take effect mid-stage. */
+export interface CooperativeGate {
+  readonly shouldStop?: () => boolean
+  readonly isPaused?: () => boolean
+  readonly hasTimedOut?: () => boolean
+}
+
 export async function runBounded<T, R>(
   items: readonly T[],
   maxConcurrent: number,
   worker: (item: T, index: number) => Promise<R>,
-  shouldStop?: () => boolean,
+  gate: CooperativeGate = {},
 ): Promise<Array<R | undefined>> {
   const results: Array<R | undefined> = new Array(items.length).fill(undefined)
   let next = 0
@@ -17,7 +17,11 @@ export async function runBounded<T, R>(
 
   async function lane(): Promise<void> {
     while (true) {
-      if (shouldStop?.()) return
+      if (gate.shouldStop?.()) return
+      while (gate.isPaused?.() && !gate.shouldStop?.()) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
+      if (gate.shouldStop?.() || gate.hasTimedOut?.()) return
       const index = next++
       if (index >= items.length) return
       results[index] = await worker(items[index]!, index)

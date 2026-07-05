@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { summarize } from "../../src/ultracode/summarizer"
-import { DEFAULT_ULTRACODE_CONFIG } from "../../src/config"
+import { DEFAULT_ULTRACODE_CONFIG } from "../../src/ultracode/config"
 import type { BudgetReport, WorkflowDef, WorkflowResults } from "../../src/contracts"
 
 const def: WorkflowDef = { title: "My Flow", stages: [{ kind: "fanout", name: "audit", agents: [{ name: "a", task: "x", agent: "explore" }] }] }

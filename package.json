@@ -4,7 +4,6 @@
   "description": "Auto mode + ultracode dynamic workflows for opencode.",
   "type": "module",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "files": [
     "dist",
     "command",
@@ -13,7 +12,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --log-level=warning",
     "verify": "npm run build && node scripts/verify-dist.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
@@ -32,6 +31,7 @@
     "@opencode-ai/plugin": "^1.16.0",
     "@opencode-ai/sdk": "^1.16.0",
     "@types/node": "^25.9.2",
+    "esbuild": "^0.21.5",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   },

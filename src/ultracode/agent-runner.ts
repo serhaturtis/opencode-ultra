@@ -13,6 +13,7 @@ import { type AgentResult, type AgentRunStatus, type AgentSpec } from "../contra
 import { withTimeout } from "./pool.js"
 import { Budget } from "./budget.js"
 import { describeSchema, parseAndValidate } from "./schema.js"
+import { errMsg } from "../util.js"
 
 export interface RunAgentOptions {
   readonly sdk: ISdkClient
@@ -38,12 +39,13 @@ export async function runAgent(spec: AgentSpec, task: string, opts: RunAgentOpti
   const prompt = spec.schema ? `${task}\n${describeSchema(spec.schema)}` : task
 
   let lastError = "agent did not run"
-  for (let attempt = 0; attempt <= opts.retries; attempt++) {
+  const maxAttempts = Math.max(0, opts.retries) + 1
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let subId: string
     try {
       subId = await opts.sdk.createSession(opts.parentSessionId, `wf:${spec.name}`, opts.directory)
     } catch (err) {
-      lastError = message(err)
+      lastError = errMsg(err)
       continue // transient — retry session creation
     }
     try {
@@ -62,27 +64,28 @@ export async function runAgent(spec: AgentSpec, task: string, opts: RunAgentOpti
           return { name: spec.name, status: "completed", text: run.text, data, cost: run.cost, tokens: run.tokens }
         } catch (err) {
           opts.onStatus("error")
-          return { name: spec.name, status: "error", text: run.text, error: `schema validation failed: ${message(err)}`, cost: run.cost, tokens: run.tokens }
+          return { name: spec.name, status: "error", text: run.text, error: `schema validation failed: ${errMsg(err)}`, cost: run.cost, tokens: run.tokens }
         }
       }
 
       opts.onStatus("completed")
       return { name: spec.name, status: "completed", text: run.text, cost: run.cost, tokens: run.tokens }
     } catch (err) {
-      lastError = message(err) // prompt threw — retry
+      lastError = errMsg(err) // prompt threw — retry
     } finally {
       await opts.sdk.deleteSession(subId)
     }
   }
 
   opts.onStatus("error")
+  // All retries exhausted without a recorded cost: release the cost reservation
+  // this agent's start() claimed, so reservedUsd doesn't permanently over-count
+  // a failed agent's projected spend. started is intentionally NOT decremented —
+  // maxAgents caps total starts (successful or not) as a hard ceiling.
+  opts.budget.release()
   return fail(spec.name, lastError)
 }
 
 function fail(name: string, error: string): AgentResult {
   return { name, status: "error", text: "", error, cost: 0, tokens: 0 }
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

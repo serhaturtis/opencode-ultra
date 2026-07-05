@@ -18,9 +18,16 @@ import * as crypto from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { type AgentResult } from "../contracts.js"
+import { slugify, errMsg } from "../util.js"
 
 export interface GitResult { readonly stdout: string; readonly code: number }
 export type GitRunner = (args: readonly string[], cwd: string) => Promise<GitResult>
+
+/** A live isolation session tracked for reclamation on teardown. */
+interface ActiveHandle {
+  readonly branches: readonly string[]
+  readonly dirs: readonly string[]
+}
 
 const execFileP = promisify(execFile)
 const defaultGit: GitRunner = async (args, cwd) => {
@@ -41,10 +48,20 @@ export interface IsolationSession {
    * `results` is indexed by ORIGINAL agent position (same as dirs/branches): a hole
    * (undefined = an agent that never ran) is cleaned up, not merged.
    */
-  integrate(results: readonly (AgentResult | undefined)[], log: (message: string) => Promise<void>): Promise<void>
+  integrate(results: readonly (AgentResult | undefined)[], log: (message: string) => void): Promise<void>
+  /**
+   * Remove every worktree/branch WITHOUT merging — the failure-rollback path used
+   * when the fanout throws between begin() and integrate(). Per-item failures are
+   * surfaced through `log` (never silently swallowed) but never abort sibling
+   * cleanups, so one stuck branch can't strand the rest.
+   */
+  cleanup(log?: (message: string) => void): Promise<void>
 }
 
 export class WorktreeManager {
+  /** Every currently-active isolation session this manager opened — for reclamation on teardown. */
+  private readonly active = new Set<ActiveHandle>()
+
   constructor(
     private readonly projectDir: string,
     private readonly git: GitRunner = defaultGit,
@@ -60,7 +77,7 @@ export class WorktreeManager {
       throw new Error("worktree isolation requires no uncommitted tracked changes (commit or stash them first)")
     }
     const base = (await this.git(["rev-parse", "HEAD"], this.projectDir)).stdout.trim()
-    const slug = sanitize(stageName)
+    const slug = slugify(stageName)
     const run = crypto.randomUUID().slice(0, 8)
 
     const branches: string[] = []
@@ -70,7 +87,7 @@ export class WorktreeManager {
         // Include the per-run id in the BRANCH too (not just the dir): two concurrent
         // isolate workflows with the same stage/agent names would otherwise collide on
         // the branch name and crash the second one.
-        const branch = `wf/${slug}/${run}/${i}-${sanitize(agentNames[i]!)}`
+        const branch = `wf/${slug}/${run}/${i}-${slugify(agentNames[i]!)}`
         const dir = path.join(os.tmpdir(), `oc-ultra-${slug}-${run}-${i}`)
         const added = await this.git(["worktree", "add", "-b", branch, dir, base], this.projectDir)
         if (added.code !== 0) throw new Error(`failed to create worktree '${dir}': ${added.stdout.trim()}`)
@@ -78,15 +95,35 @@ export class WorktreeManager {
         dirs.push(dir)
       }
     } catch (err) {
-      // Fail fast, but never leak half-created worktrees/branches: roll back the
-      // ones already added before re-throwing.
-      for (let i = 0; i < dirs.length; i++) await this.remove(dirs[i]!, branches[i]!).catch(() => {})
+      // Roll back already-created worktrees. Per-item failures are collected
+      // and appended to the original error so they surface — one stuck branch
+      // can't stop siblings from being cleaned up, but the failure is visible.
+      const cleanErrs: string[] = []
+      for (let i = 0; i < dirs.length; i++) {
+        try { await this.remove(dirs[i]!, branches[i]!) }
+        catch (cleanupErr) { cleanErrs.push(errMsg(cleanupErr)) }
+      }
+      if (cleanErrs.length > 0) throw new Error(`${errMsg(err)} [cleanup errors: ${cleanErrs.join("; ")}]`)
       throw err
     }
 
+    // Register the live session so dispose() / session.deleted can reclaim it.
+    const handle: ActiveHandle = { branches, dirs }
+    this.active.add(handle)
+    const release = () => { this.active.delete(handle) }
+
     return {
       dirs,
-      integrate: (results, log) => this.integrate(stageName, agentNames, branches, dirs, results, log),
+      integrate: async (results, log) => { try { return await this.integrate(stageName, agentNames, branches, dirs, results, log) } finally { release() } },
+      cleanup: async (log) => { try { return await this.cleanupSet(branches, dirs, log) } finally { release() } },
+    }
+  }
+
+  async cleanupAllActive(log?: (message: string) => void): Promise<void> {
+    const pending = [...this.active]
+    for (const h of pending) {
+      await this.cleanupSet(h.branches, h.dirs, log)
+      this.active.delete(h)
     }
   }
 
@@ -96,7 +133,7 @@ export class WorktreeManager {
     branches: readonly string[],
     dirs: readonly string[],
     results: readonly (AgentResult | undefined)[],
-    log: (message: string) => Promise<void>,
+    log: (message: string) => void,
   ): Promise<void> {
     for (let i = 0; i < dirs.length; i++) {
       const dir = dirs[i]!
@@ -109,24 +146,39 @@ export class WorktreeManager {
       if (added.code !== 0) {
         // Staging FAILED (not "no changes"): surface it and KEEP the branch so the
         // agent's work is recoverable rather than silently discarded.
-        await log(`Worktree staging failed for agent '${agentNames[i]}' (${added.stdout.trim()}); left on branch '${branch}' for manual recovery.`)
+        log(`Worktree staging failed for agent '${agentNames[i]}' (${added.stdout.trim()}); left on branch '${branch}' for manual recovery.`)
         await this.removeWorktree(dir)
+        continue
+      }
+      // Distinguish "nothing staged" from a real commit failure (hook/GPG).
+      // `diff --cached --quiet` exits 0 only when nothing is staged.
+      const staged = await this.git(["diff", "--cached", "--quiet"], dir)
+      if (staged.code === 0) {
+        await this.remove(dir, branch)
         continue
       }
       const committed = await this.git(["commit", "-m", `wf: ${stageName} / ${agentNames[i]}`], dir)
       if (committed.code !== 0) {
-        // Genuinely nothing to commit — the agent made no file changes.
-        await this.remove(dir, branch)
+        log(`Worktree commit failed for agent '${agentNames[i]}' (${committed.stdout.trim()}); left on branch '${branch}' for manual recovery.`)
+        await this.removeWorktree(dir)
         continue
       }
       const merged = await this.git(["merge", "--no-ff", "-m", `wf merge: ${branch}`, branch], this.projectDir)
       if (merged.code !== 0) {
         await this.git(["merge", "--abort"], this.projectDir)
-        await log(`Worktree merge conflict from agent '${agentNames[i]}'; left on branch '${branch}' for manual integration.`)
+        log(`Worktree merge conflict from agent '${agentNames[i]}'; left on branch '${branch}' for manual integration.`)
         await this.removeWorktree(dir) // keep the branch
         continue
       }
       await this.remove(dir, branch)
+    }
+  }
+
+  /** Failure rollback: remove every worktree+branch without merging. Per-item failures are logged, never thrown. */
+  private async cleanupSet(branches: readonly string[], dirs: readonly string[], log?: (message: string) => void): Promise<void> {
+    for (let i = 0; i < dirs.length; i++) {
+      try { await this.remove(dirs[i]!, branches[i]!) }
+      catch (err) { log?.(`Worktree cleanup failed for '${dirs[i]}' (${errMsg(err)}); branch '${branches[i]}' left for manual cleanup.`) }
     }
   }
 
@@ -137,15 +189,16 @@ export class WorktreeManager {
 
   private async removeWorktree(dir: string): Promise<void> {
     const res = await this.git(["worktree", "remove", "--force", dir], this.projectDir)
-    if (res.code !== 0) {
-      // git couldn't remove it — delete the directory directly so /tmp doesn't
-      // accumulate, then prune the now-stale worktree registration.
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
-      await this.git(["worktree", "prune"], this.projectDir)
+    if (res.code === 0) return
+    // git couldn't remove it — delete the directory directly so /tmp doesn't
+    // accumulate, then prune the now-stale worktree registration. A double
+    // failure (git AND fs.rm both fail) is a real leak and must surface, not be
+    // silently swallowed.
+    try {
+      await fs.rm(dir, { recursive: true, force: true })
+    } catch (err) {
+      throw new Error(`could not remove worktree '${dir}' (git: ${res.stdout.trim()}; fs.rm: ${errMsg(err)})`)
     }
+    await this.git(["worktree", "prune"], this.projectDir)
   }
-}
-
-function sanitize(name: string): string {
-  return name.replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-|-$/g, "") || "agent"
 }

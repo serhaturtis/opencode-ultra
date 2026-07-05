@@ -6,5 +6,9 @@ dist/
 # install — this repo must never carry a .opencode/ of its own.
 .opencode/
 
+# opencode-ultra runtime output: per-run workflow journals (resume state) and
+# any other plugin-written state. Generated, not source.
+.opencode-ultra/
+
 # scratch
 *.tar.gz

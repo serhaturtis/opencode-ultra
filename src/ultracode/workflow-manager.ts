@@ -7,7 +7,6 @@ import { tool } from "@opencode-ai/plugin"
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import { type UltraState, type WorkflowJob } from "../contracts.js"
-import { completeJob } from "../state.js"
 import { saveWorkflowAsCommand } from "./command-saver.js"
 import { WorkflowNotFoundError } from "../errors.js"
 
@@ -38,9 +37,13 @@ export function createWorkflowManagerTool(state: UltraState) {
           job.resume()
           return { title: "Workflow resumed", output: `Resumed: ${job.title}`, metadata: { status: job.status } }
         case "stop":
+          // Request cancellation only. Recording completion (completeJob) and
+          // notifying the session happen in execute()'s finally — once the run has
+          // ACTUALLY wound down, not the instant the user asks. Eagerly moving the
+          // job to completed here would mislabel it as done while it is still
+          // spending budget, and would race execute()'s own completion path.
           job.stop()
-          completeJob(state, job)
-          return { title: "Workflow stopped", output: `Stopped: ${job.title}`, metadata: { status: job.status } }
+          return { title: "Workflow stop requested", output: `Stop requested: ${job.title} (winding down)`, metadata: { status: job.status } }
         case "save": {
           const name = await saveWorkflowAsCommand(job.def, args.commandName ?? job.title, async (filePath, content) => {
             await fs.mkdir(path.dirname(filePath), { recursive: true })

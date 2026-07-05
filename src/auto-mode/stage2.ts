@@ -32,14 +32,14 @@ export class ClassifierSession {
     try {
       const agents = await this.sdk.listAgents()
       if (agents.length > 0 && !agents.includes(config.classifier.agent)) {
-        console.warn(
-          `[opencode-ultra] classifier agent '${config.classifier.agent}' is not among available agents ` +
+        this.sdk.log("warn",
+          `classifier agent '${config.classifier.agent}' is not among available agents ` +
           `[${agents.join(", ")}]. Stage 2 will DEFER to normal permissions until you set ` +
           `autoMode.classifier.agent to a listed agent (or set autoMode.classifier.model).`,
         )
       }
     } catch (err) {
-      console.warn(`[opencode-ultra] could not verify the classifier agent: ${err instanceof Error ? err.message : String(err)}`)
+      this.sdk.log("warn", `could not verify the classifier agent: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -54,7 +54,7 @@ export class ClassifierSession {
       // Can't reach the classifier → DEFER to normal permissions (Stage 1 still
       // blocks the catastrophic set), rather than blocking routine work.
       const message = err instanceof Error ? err.message : String(err)
-      console.warn(`[opencode-ultra] safety classifier unavailable: ${message}. Deferring to normal permissions.`)
+      this.sdk.log("warn", `safety classifier unavailable: ${message}. Deferring to normal permissions.`)
       return { verdict: "DEFER", reason: `classifier unavailable: ${message}` }
     }
     return parseClassification(text)
@@ -75,11 +75,11 @@ export class ClassifierSession {
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.warn(`[opencode-ultra] injection detector unavailable: ${message}. Treating as injection.`)
+      this.sdk.log("warn", `injection detector unavailable: ${message}. Treating as injection.`)
       return true
     }
-    // Only an explicit SAFE clears the content.
-    return !/^\s*safe\b/i.test(text.trim())
+    // Classifier cleared the content explicitly — "safe" can appear anywhere.
+    return !/\bsafe\b/i.test(text)
   }
 
   /**
@@ -168,9 +168,9 @@ function parseClassification(text: string): Stage2Classification {
     return { verdict: "DEFER", reason: `classifier produced no clear verdict: "${clean.slice(0, 120)}"` }
   }
   if (hasAllow) {
-    const m = /^ALLOW[\s|:>-]*(.*)$/is.exec(clean)
+    const m = /ALLOW[\s|:>-]*([^\n]*)/i.exec(clean)
     return { verdict: "ALLOW", reason: m?.[1]?.trim() || "allowed" }
   }
-  const m = /^DENY[\s|:>-]*(.*)$/is.exec(clean)
+  const m = /DENY[\s|:>-]*([^\n]*)/i.exec(clean)
   return { verdict: "DENY", reason: m?.[1]?.trim() || "denied" }
 }

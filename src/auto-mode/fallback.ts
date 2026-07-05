@@ -28,15 +28,12 @@ export function recordDenial(
 }
 
 /**
- * Records an approval. Resets the consecutive denial counter.
- * If auto mode was paused, resumes it.
+ * Records an approval. Resets consecutive denials, resumes if paused.
+ * totalDenials is NOT reset — it's a session-lifetime circuit breaker.
  */
 export function recordApproval(state: AutoModeState): void {
   state.consecutiveDenials = 0
-  if (state.paused) {
-    state.paused = false
-    state.totalDenials = 0
-  }
+  if (state.active && state.paused) state.paused = false
 }
 
 /**

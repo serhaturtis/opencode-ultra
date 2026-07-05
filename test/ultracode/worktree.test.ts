@@ -16,6 +16,10 @@ function fakeGit(script: (args: readonly string[]) => GitResult | undefined) {
 
 const clean = (args: readonly string[]): GitResult | undefined => {
   if (args[0] === "rev-parse" && args[1] === "HEAD") return { stdout: "base", code: 0 }
+  // `git diff --cached --quiet` exits 1 when staged changes EXIST (the normal
+  // integrate case); exit 0 means nothing staged. The default here is "changes
+  // present" so the commit+merge path runs.
+  if (args[0] === "diff" && args[1] === "--cached" && args[2] === "--quiet") return { stdout: "", code: 1 }
   return undefined // status → clean, everything else → ok
 }
 
@@ -115,12 +119,68 @@ describe("WorktreeManager", () => {
   })
 
   it("does not merge an agent that made no changes", async () => {
+    // "No changes" is now detected precisely via `git diff --cached --quiet`
+    // (exit 0 = nothing staged), not by assuming any non-zero commit exit means
+    // "nothing to commit" (which discarded real work on hook/GPG failures).
     const g = fakeGit((a) => {
-      if (a[0] === "commit") return { stdout: "nothing to commit", code: 1 }
+      if (a[0] === "diff" && a[1] === "--cached" && a[2] === "--quiet") return { stdout: "", code: 0 }
       return clean(a)
     })
     const session = await new WorktreeManager("/proj", g.run).begin("stage", ["a"])
     await session.integrate([ok("a")], async () => {})
-    expect(g.calls.some((c) => c.startsWith("merge --no-ff"))).toBe(false)
+    expect(g.calls.some((c) => c.startsWith("diff --cached --quiet"))).toBe(true)
+    expect(g.calls.some((c) => c.startsWith("commit"))).toBe(false)        // never committed
+    expect(g.calls.some((c) => c.startsWith("merge --no-ff"))).toBe(false) // not merged
+  })
+
+  it("keeps the branch when commit FAILS for a real reason (hook/GPG/identity) — no data loss", async () => {
+    // ENG-WT-01: previously any non-zero commit exit was misread as "nothing to
+    // commit" and the branch was force-deleted, discarding staged work. A staged
+    // diff that then fails to commit must keep the branch for recovery.
+    const logged: string[] = []
+    const g = fakeGit((a) => {
+      if (a[0] === "diff" && a[1] === "--cached" && a[2] === "--quiet") return { stdout: "", code: 1 } // changes staged
+      if (a[0] === "commit") return { stdout: "husky pre-commit failed", code: 1 }
+      return clean(a)
+    })
+    const session = await new WorktreeManager("/proj", g.run).begin("stage", ["a"])
+    await session.integrate([ok("a")], async (m) => { logged.push(m) })
+    expect(logged.some((m) => /commit failed/i.test(m))).toBe(true)
+    expect(g.calls.some((c) => c.startsWith("merge --no-ff"))).toBe(false) // not merged
+    expect(g.calls.some((c) => c.startsWith("branch -D"))).toBe(false)     // branch KEPT for recovery
+  })
+
+  it("cleanupAllActive reclaims sessions left dangling by a killed-mid-run workflow (teardown)", async () => {
+    // ARCH-002: a workflow killed between begin() and integrate() leaves live
+    // worktrees. The manager tracks them so plugin teardown can reclaim all.
+    const g = fakeGit(clean)
+    const mgr = new WorktreeManager("/proj", g.run)
+    const session = await mgr.begin("stage", ["a", "b"])
+    // Simulate the workflow being killed: neither integrate nor cleanup ran.
+    expect(session.dirs).toHaveLength(2)
+    await mgr.cleanupAllActive()
+    // Both worktrees and branches were removed despite no integrate.
+    expect(g.calls.filter((c) => c.startsWith("worktree remove"))).toHaveLength(2)
+    expect(g.calls.filter((c) => c.startsWith("branch -D"))).toHaveLength(2)
+  })
+
+  it("cleanupAllActive drains the active set and is a no-op when nothing is active", async () => {
+    const g = fakeGit(clean)
+    const mgr = new WorktreeManager("/proj", g.run)
+    // Nothing begun yet — must not throw and must issue no git commands.
+    await expect(mgr.cleanupAllActive()).resolves.toBeUndefined()
+    expect(g.calls.length).toBe(0)
+
+    // Begin two sessions without integrate/cleanup (simulating killed workflows).
+    await mgr.begin("stage", ["a"])
+    await mgr.begin("other", ["b"])
+    const before = g.calls.filter((c) => c.startsWith("worktree remove")).length
+    await mgr.cleanupAllActive()
+    // Both sessions' worktrees reclaimed.
+    expect(g.calls.filter((c) => c.startsWith("worktree remove")).length - before).toBe(2)
+    // A second cleanup is a no-op — the set was drained.
+    const drained = g.calls.length
+    await mgr.cleanupAllActive()
+    expect(g.calls.length).toBe(drained)
   })
 })

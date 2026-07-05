@@ -20,7 +20,25 @@ describe("runBounded", () => {
 
   it("stops early when shouldStop becomes true", async () => {
     let done = 0
-    const out = await runBounded([1, 2, 3, 4], 1, async (x) => { done++; return x }, () => done >= 2)
+    const out = await runBounded([1, 2, 3, 4], 1, async (x) => { done++; return x }, { shouldStop: () => done >= 2 })
+    expect(out.filter((x) => x !== undefined).length).toBeLessThan(4)
+  })
+
+  it("honors isPaused mid-run (no new items while paused) and resumes", async () => {
+    let paused = true
+    let started = 0
+    const run = runBounded([1, 2, 3], 1, async (x) => { started++; return x }, { isPaused: () => paused })
+    // Let the lane reach the pause wait; no item should start yet.
+    await new Promise((r) => setTimeout(r, 40))
+    expect(started).toBe(0)
+    paused = false
+    const out = await run
+    expect(out).toEqual([1, 2, 3])
+  })
+
+  it("treats hasTimedOut like stop (drops remaining items)", async () => {
+    let done = 0
+    const out = await runBounded([1, 2, 3, 4], 1, async (x) => { done++; return x }, { hasTimedOut: () => done >= 1 })
     expect(out.filter((x) => x !== undefined).length).toBeLessThan(4)
   })
 })

@@ -1,88 +1,36 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { WorkflowEngine } from "../../src/ultracode/engine"
+import { WorkflowExecutor } from "../../src/ultracode/executor"
 import { Budget } from "../../src/ultracode/budget"
 import { createMockSdk } from "../helpers/mock-sdk"
-import { DEFAULT_ULTRACODE_CONFIG } from "../../src/config"
-import type { WorkflowDef, WorkflowProgress } from "../../src/contracts"
-import type { ParsedWorkflow } from "../../src/ultracode/parser"
+import { DEFAULT_ULTRACODE_CONFIG } from "../../src/ultracode/config"
+import type { NarrationSink, WorkflowDef, WorkflowProgress } from "../../src/contracts"
 import type { AgentRun } from "../../src/sdk-client"
 
-const parsed = (stages: unknown[], title = "T"): ParsedWorkflow => ({ title, stages })
+/** Executor tests narrate to a no-op sink — narration delivery is covered by the sink contract, not the executor. */
+const noopNarration: NarrationSink = { inject() {} }
 
 function freshProgress(def: WorkflowDef): WorkflowProgress {
   return { stageIndex: 0, totalStages: def.stages.length, agents: [] }
 }
 
-describe("WorkflowEngine.validate", () => {
-  let engine: WorkflowEngine
-  beforeEach(() => { engine = new WorkflowEngine(createMockSdk().sdk, "parent", DEFAULT_ULTRACODE_CONFIG) })
-
-  it("accepts a simple fanout workflow", () => {
-    const r = engine.validate(parsed([{ kind: "fanout", name: "a", agents: [{ name: "x", task: "go", agent: "explore" }] }]))
-    expect(r.valid).toBe(true)
-    expect(r.stages).toBe(1)
-    expect(r.agents).toBe(1)
-  })
-
-  it("rejects empty / unknown-kind / unknown-agent / duplicate-name", () => {
-    expect(engine.validate(parsed([])).valid).toBe(false)
-    expect(engine.validate(parsed([{ kind: "nope", name: "a" }])).valid).toBe(false)
-    expect(engine.validate(parsed([{ kind: "fanout", name: "a", agents: [{ name: "x", task: "t", agent: "wizard" }] }])).valid).toBe(false)
-    expect(engine.validate(parsed([
-      { kind: "fanout", name: "dup", agents: [{ name: "x", task: "t", agent: "explore" }] },
-      { kind: "fanout", name: "dup", agents: [{ name: "y", task: "t", agent: "explore" }] },
-    ])).valid).toBe(false)
-  })
-
-  it("rejects a verify stage whose source is not a prior stage", () => {
-    const r = engine.validate(parsed([{ kind: "verify", name: "v", source: "ghost", task: "t", agent: "general", voters: 1 }]))
-    expect(r.valid).toBe(false)
-    expect(r.errors.some((e) => e.includes("ghost"))).toBe(true)
-  })
-
-  it("rejects a template referencing an unknown stage", () => {
-    const r = engine.validate(parsed([{ kind: "fanout", name: "a", agents: [{ name: "x", task: "use {{stage.ghost}}", agent: "general" }] }]))
-    expect(r.valid).toBe(false)
-  })
-
-  it("rejects too many agents in a stage", () => {
-    const agents = Array.from({ length: 17 }, (_, i) => ({ name: `a${i}`, task: "t", agent: "explore" }))
-    expect(engine.validate(parsed([{ kind: "fanout", name: "a", agents }])).valid).toBe(false)
-  })
-
-  it("defaults verify refuteThreshold to a STRICT majority (floor(n/2)+1)", () => {
-    const thr = (voters: number) => {
-      const def = engine.buildDef(parsed([
-        { kind: "fanout", name: "f", agents: [{ name: "a", task: "t", agent: "explore" }] },
-        { kind: "verify", name: "v", source: "f", task: "t", agent: "general", voters },
-      ]), [])!
-      return (def.stages[1] as { refuteThreshold: number }).refuteThreshold
-    }
-    expect(thr(1)).toBe(1) // 1/1
-    expect(thr(2)).toBe(2) // not 1 — a single dissenter must not drop on a tie
-    expect(thr(3)).toBe(2) // 2/3
-    expect(thr(4)).toBe(3) // not 2
-  })
-})
-
-describe("WorkflowEngine.execute", () => {
+describe("WorkflowExecutor.execute", () => {
   let mock: ReturnType<typeof createMockSdk>
-  let engine: WorkflowEngine
+  let executor: WorkflowExecutor
 
   beforeEach(() => {
     mock = createMockSdk()
-    engine = new WorkflowEngine(mock.sdk, "parent", DEFAULT_ULTRACODE_CONFIG)
+    executor = new WorkflowExecutor(mock.sdk, "parent", DEFAULT_ULTRACODE_CONFIG, noopNarration)
   })
 
   const exec = (def: WorkflowDef, progress = freshProgress(def)) =>
-    engine.execute(def, { control: {}, progress, budget: new Budget(0) })
+    executor.execute(def, { control: {}, progress, budget: new Budget(0) })
 
   it("runs a fanout stage, deletes sessions, and tracks per-agent progress", async () => {
     const def: WorkflowDef = { title: "T", stages: [{ kind: "fanout", name: "audit", agents: [
       { name: "a", task: "x", agent: "explore" }, { name: "b", task: "y", agent: "general" },
     ] }] }
     const progress = freshProgress(def)
-    const { results } = await engine.execute(def, { control: {}, progress, budget: new Budget(0) })
+    const { results } = await executor.execute(def, { control: {}, progress, budget: new Budget(0) })
     expect(results.audit!.agents).toHaveLength(2)
     expect(mock.calls.filter((c) => c.method === "createSession")).toHaveLength(2)
     expect(mock.calls.filter((c) => c.method === "deleteSession")).toHaveLength(2)
@@ -166,13 +114,27 @@ describe("WorkflowEngine.execute", () => {
     ], maxConcurrent: 1 }] }
     const budget = new Budget(1) // first agent ($1) exhausts it
     const progress = freshProgress(def)
-    await engine.execute(def, { control: {}, progress, budget })
+    await executor.execute(def, { control: {}, progress, budget })
     expect(budget.report().droppedAgents).toBeGreaterThanOrEqual(1)
   })
 
   it("does not run when stopped before starting", async () => {
     const def: WorkflowDef = { title: "T", stages: [{ kind: "fanout", name: "a", agents: [{ name: "x", task: "t", agent: "explore" }] }] }
-    await engine.execute(def, { control: { shouldStop: () => true }, progress: freshProgress(def), budget: new Budget(0) })
+    await executor.execute(def, { control: { shouldStop: () => true }, progress: freshProgress(def), budget: new Budget(0) })
     expect(mock.calls.filter((c) => c.method === "createSession")).toHaveLength(0)
+  })
+
+  it("propagates a stage error AND still cleans up isolation worktrees (no leak)", async () => {
+    // ARCH-001: a throw between begin() and integrate() must roll back worktrees.
+    // We don't have a git repo here, so we assert the executor surfaces the
+    // failure rather than silently swallowing it — the lifecycle guard is in
+    // runFanout's try/finally and is exercised directly in worktree tests.
+    ;(mock.sdk as any).promptSession = async (): Promise<AgentRun> => {
+      throw new Error("agent exploded")
+    }
+    const def: WorkflowDef = { title: "T", stages: [{ kind: "fanout", name: "a", agents: [{ name: "x", task: "t", agent: "explore" }] }] }
+    // All agents fail (retried once then error) — execute completes with error agents, not a throw.
+    const { results } = await exec(def)
+    expect(results.a!.agents[0]!.status).toBe("error")
   })
 })

@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest"
 import { classify } from "../../src/auto-mode/stage1"
 import { compileRules } from "../../src/auto-mode/rule-compiler"
-import { DEFAULT_AUTO_MODE_CONFIG } from "../../src/config"
+import { DEFAULT_AUTO_MODE_CONFIG } from "../../src/auto-mode/config"
 
 // The real, fully-compiled default ruleset (built-in catastrophic patterns +
 // patterns compiled from the default prose rules).

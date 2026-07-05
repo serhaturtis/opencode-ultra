@@ -2,9 +2,10 @@
  * Ultracode system reminder — injected into the model's system prompt when
  * ultracode mode is active (session or single-turn).
  */
+import { systemReminder } from "../util.js"
+
 export function buildUltracodeReminder(): string {
-  return [
-    "<system-reminder>",
+  return systemReminder(
     "You are in ULTRACODE mode — maximum reasoning effort plus proactive",
     "multi-agent workflow orchestration via the `workflow` tool.",
     "",
@@ -26,6 +27,5 @@ export function buildUltracodeReminder(): string {
     "Prefer a verify stage for audits and reviews — it removes plausible-but-wrong",
     "findings. Don't use workflows for single-file edits, simple questions, or",
     "purely conversational requests.",
-    "</system-reminder>",
-  ].join("\n")
+  )
 }

@@ -71,4 +71,34 @@ describe("validateTemplates", () => {
     ] }
     expect(validateTemplates(bad).some((e) => e.includes("ghost"))).toBe(true)
   })
+
+  it("rejects a FORWARD step reference (ENG-TM-04: used to pass, failed at runtime)", () => {
+    const def: WorkflowDef = { title: "", stages: [
+      { kind: "pipeline", name: "p", over: ["a"], steps: [
+        { name: "one", task: "use {{step.two}}", agent: "general" }, // two hasn't run yet
+        { name: "two", task: "ok", agent: "general" },
+      ] },
+    ] }
+    const errs = validateTemplates(def)
+    expect(errs.some((e) => /step 'two' before it has run/.test(e))).toBe(true)
+  })
+
+  it("rejects an agent reference into a verify stage (ENG-TM-08: dynamic voter names)", () => {
+    const def: WorkflowDef = { title: "", stages: [
+      { kind: "fanout", name: "find", agents: [{ name: "f", task: "find", agent: "explore" }] },
+      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1 },
+      { kind: "fanout", name: "use", agents: [{ name: "u", task: "{{stage.refute.anything}}", agent: "general" }] },
+    ] }
+    const errs = validateTemplates(def)
+    expect(errs.some((e) => /cannot reference an agent in stage 'refute'/.test(e))).toBe(true)
+  })
+
+  it("still allows a 2-part {{stage.<verify>}} summary reference", () => {
+    const def: WorkflowDef = { title: "", stages: [
+      { kind: "fanout", name: "find", agents: [{ name: "f", task: "find", agent: "explore" }] },
+      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1 },
+      { kind: "fanout", name: "use", agents: [{ name: "u", task: "survivors: {{stage.refute}}", agent: "general" }] },
+    ] }
+    expect(validateTemplates(def)).toEqual([])
+  })
 })

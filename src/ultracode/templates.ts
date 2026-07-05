@@ -10,7 +10,7 @@
  * sees them and can report — never silently dropped. `validateTemplates` catches
  * the same problems at validate time, before anything runs.
  */
-import { type Stage, type WorkflowDef } from "../contracts.js"
+import { type Stage, type StageKind, type WorkflowDef } from "../contracts.js"
 
 const TOKEN = /\{\{\s*([\w.-]+)\s*\}\}/g
 
@@ -51,27 +51,44 @@ function resolveRef(ref: string, ctx: TemplateContext): string {
 /** Validate every template reference against the stages that precede it. */
 export function validateTemplates(def: WorkflowDef): string[] {
   const errors: string[] = []
-  const priorStages = new Map<string, ReadonlySet<string>>() // stage name → agent names
+  // A prior stage's referenceable agent names AND its kind (verify stages emit
+  // dynamic per-finding voter names, so they have no referenceable agents).
+  const priorStages = new Map<string, { agents: ReadonlySet<string>; kind: StageKind }>()
 
   for (const stage of def.stages) {
-    for (const { task, where } of stageTasks(stage)) {
+    for (const { task, where, priorSteps } of stageTasks(stage)) {
       for (const ref of references(task)) {
-        checkRef(ref, stage, priorStages, where, errors)
+        checkRef(ref, stage, priorStages, where, errors, priorSteps)
       }
     }
-    priorStages.set(stage.name, agentNamesOf(stage))
+    priorStages.set(stage.name, { agents: agentNamesOf(stage), kind: stage.kind })
   }
   return errors
 }
 
-interface TaskRef { readonly task: string; readonly where: string }
+interface TaskRef {
+  readonly task: string
+  readonly where: string
+  /** For pipeline steps: the set of step names that have run BEFORE this one. */
+  readonly priorSteps?: ReadonlySet<string>
+}
 
 function stageTasks(stage: Stage): TaskRef[] {
   switch (stage.kind) {
     case "fanout":
       return stage.agents.map((a) => ({ task: a.task, where: `stage '${stage.name}', agent '${a.name}'` }))
-    case "pipeline":
-      return stage.steps.map((s) => ({ task: s.task, where: `stage '${stage.name}', step '${s.name}'` }))
+    case "pipeline": {
+      // Steps run in order within each item; a later step may reference an earlier
+      // step's output but NOT a later one. Snapshot the steps-seen-so-far per step
+      // (a live reference would mutate to the full set before checkRef runs).
+      const out: TaskRef[] = []
+      const seen = new Set<string>()
+      for (const s of stage.steps) {
+        out.push({ task: s.task, where: `stage '${stage.name}', step '${s.name}'`, priorSteps: new Set(seen) })
+        seen.add(s.name)
+      }
+      return out
+    }
     case "verify":
       return [{ task: stage.task, where: `stage '${stage.name}' (verify)` }]
     case "loop":
@@ -99,14 +116,20 @@ function references(task: string): string[] {
 function checkRef(
   ref: string,
   stage: Stage,
-  priorStages: Map<string, ReadonlySet<string>>,
+  priorStages: Map<string, { agents: ReadonlySet<string>; kind: StageKind }>,
   where: string,
   errors: string[],
+  priorSteps?: ReadonlySet<string>,
 ): void {
   if (ref === "item" || ref.startsWith("step.")) {
     if (stage.kind !== "pipeline") errors.push(`${where}: {{${ref}}} is only valid inside a pipeline stage`)
-    else if (ref.startsWith("step.") && !stage.steps.some((s) => s.name === ref.slice(5))) {
-      errors.push(`${where}: references unknown step '${ref.slice(5)}'`)
+    else if (ref.startsWith("step.")) {
+      const stepName = ref.slice(5)
+      if (!stage.steps.some((s) => s.name === stepName)) {
+        errors.push(`${where}: references unknown step '${stepName}'`)
+      } else if (!priorSteps?.has(stepName)) {
+        errors.push(`${where}: references step '${stepName}' before it has run — forward step references are not allowed`)
+      }
     }
     return
   }
@@ -119,12 +142,16 @@ function checkRef(
     errors.push(`${where}: unrecognized reference {{${ref}}}`)
     return
   }
-  const agents = priorStages.get(parts[1]!)
-  if (!agents) {
+  const entry = priorStages.get(parts[1]!)
+  if (!entry) {
     errors.push(`${where}: references unknown or not-yet-run stage '${parts[1]}'. Prior stages: ${[...priorStages.keys()].join(", ") || "(none)"}`)
     return
   }
-  if (parts.length === 3 && agents.size > 0 && !agents.has(parts[2]!)) {
-    errors.push(`${where}: references unknown agent '${parts[2]}' in stage '${parts[1]}'. Available: ${[...agents].join(", ")}`)
+  if (parts.length === 3) {
+    if (entry.kind === "verify") {
+      errors.push(`${where}: cannot reference an agent in stage '${parts[1]}' — verify stages emit dynamic per-finding voter names, not stable agents`)
+    } else if (entry.agents.size > 0 && !entry.agents.has(parts[2]!)) {
+      errors.push(`${where}: references unknown agent '${parts[2]}' in stage '${parts[1]}'. Available: ${[...entry.agents].join(", ")}`)
+    }
   }
 }

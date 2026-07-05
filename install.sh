@@ -25,36 +25,39 @@ if [ ! -d node_modules ]; then
   npm install
 fi
 
-echo "==> building (tsc → dist/)"
+# esbuild transpiles without type-checking, so type-check first (fail fast).
+echo "==> type-checking"
+npm run typecheck
+
+echo "==> bundling (esbuild → dist/index.js, self-contained, deps inlined)"
 npm run build
 
-# Fail fast if the built plugin can't load — never register a broken build.
-echo "==> verifying the build loads as opencode would"
+# Fail fast if the bundle can't load — never install a broken build.
+echo "==> verifying the bundle loads as opencode would"
 node scripts/verify-dist.mjs
 
-# --enable also writes the feature config (auto mode + ultracode enabled),
-# preserving any existing settings — so no manual config edit is needed.
-# Global only: installs into ~/.config/opencode (plugin + command/skills/agent
-# assets) so it works in every project, and this repo never grows a .opencode/.
-echo "==> registering plugin + enabling features in the global opencode config"
+# Installs a SELF-CONTAINED copy into ~/.config/opencode/opencode-ultra (the bundle +
+# package.json) and the command/skills/agent assets, then registers the installed
+# path — NOT this repo. --enable also turns on autoMode + ultracode (preserving any
+# existing settings). After this you can delete this repo.
+echo "==> installing the self-contained plugin into the global opencode config"
 node scripts/install.js --global --enable
 
 CONFIG_DIR="$HOME/.config/opencode"
 cat <<EOF
 
-==> Done — features are enabled, no manual edit needed.
+==> Done — installed and enabled. THIS REPO IS NO LONGER NEEDED (safe to delete).
     Config dir : $CONFIG_DIR
-    Plugin     : $ROOT/dist/index.js  (verified to load)
-    Settings   : stored in the plugin entry's options (opencode forbids unknown
-                 top-level config keys) — autoMode + ultracode enabled, defaultMode off.
-                 Existing settings are preserved; auto mode stays off until you run /auto.
+    Plugin     : $CONFIG_DIR/opencode-ultra/  (self-contained bundle — repo-independent)
+    Assets     : $CONFIG_DIR/{command,skills,agent}
+    Settings   : autoMode + ultracode enabled, defaultMode off (auto mode waits for /auto).
+                 Existing settings preserved.
 
-    Note: any same-named global commands under $CONFIG_DIR were overwritten with
-    this plugin's versions (auto.md, ultracode.md, workflows.md, etc.).
+    Note: same-named global commands/skills/agents were overwritten with this
+    plugin's versions (auto.md, ultracode.md, workflows.md, the skills, etc.).
 
 Restart opencode, then:  /auto on   ·   /ultracode on   ·   /workflows
-Want auto mode on for every session? set "defaultMode": true in the plugin's autoMode options.
 
-Rebuild + re-register after changes:  ./install.sh
-Remove:                               ./uninstall.sh
+Rebuild + reinstall after changes:  ./install.sh
+Remove:                             ./uninstall.sh
 EOF

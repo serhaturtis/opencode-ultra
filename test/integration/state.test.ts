@@ -9,7 +9,14 @@ import { compileConfig } from "../../src/config"
 import type { WorkflowJob } from "../../src/contracts"
 
 const config = compileConfig({})
-const mkJob = (id: string) => ({ id, title: id, status: "completed" } as unknown as WorkflowJob)
+const mkJob = (id: string, parentSessionId = "session"): WorkflowJob => {
+  const job = { id, title: id, parentSessionId, status: "completed" } as {
+    id: string; title: string; parentSessionId: string; status: WorkflowJob["status"]
+  }
+  return Object.assign(job as object, {
+    stop() { job.status = "cancelled" },
+  }) as unknown as WorkflowJob
+}
 
 describe("completeJob — bounded completed-jobs registry", () => {
   it("retains at most 50 completed jobs, keeping the most recent", () => {
@@ -33,5 +40,28 @@ describe("completeJob — bounded completed-jobs registry", () => {
     completeJob(state, job) // no-op: already removed from the active set
     expect(state.workflows.jobs.has("x")).toBe(false)
     expect(state.workflows.completedJobs.filter((j) => j.id === "x")).toHaveLength(1)
+  })
+})
+
+describe("stopForSession — orphan cancellation on session.deleted", () => {
+  it("cancels every in-flight job spawned by the given session and returns their ids", () => {
+    const state = createState(() => config)
+    const a1 = mkJob("a1", "sessionA"); state.workflows.jobs.set("a1", a1)
+    const a2 = mkJob("a2", "sessionA"); state.workflows.jobs.set("a2", a2)
+    const b1 = mkJob("b1", "sessionB"); state.workflows.jobs.set("b1", b1)
+
+    const stopped = state.workflows.stopForSession("sessionA")
+
+    expect(stopped.sort()).toEqual(["a1", "a2"])
+    expect(a1.status).toBe("cancelled")
+    expect(a2.status).toBe("cancelled")
+    expect(b1.status).toBe("completed") // other session untouched
+  })
+
+  it("leaves jobs of other sessions running", () => {
+    const state = createState(() => config)
+    const b1 = mkJob("b1", "sessionB"); state.workflows.jobs.set("b1", b1)
+    expect(state.workflows.stopForSession("sessionA")).toEqual([])
+    expect(b1.status).toBe("completed")
   })
 })

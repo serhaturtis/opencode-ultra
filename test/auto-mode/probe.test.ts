@@ -28,16 +28,22 @@ describe("probe: isUntrustedSource", () => {
     expect(isUntrustedSource("some_custom_tool", {}, dir)).toBe(true)
   })
 
-  it("treats vetted local tools as trusted", () => {
-    for (const tool of ["bash", "grep", "glob", "edit", "write", "apply_patch", "todowrite", "lsp", "task"]) {
+  it("treats vetted local tools as trusted; bash is untrusted (can fetch external content)", () => {
+    for (const tool of ["grep", "glob", "edit", "write", "apply_patch", "todowrite", "lsp", "task"]) {
       expect(isUntrustedSource(tool, { command: "ls" }, dir)).toBe(false)
     }
+    // AM-05: bash output is now probed — shell commands can curl/wget external
+    // content that an injection attacker controls.
+    expect(isUntrustedSource("bash", { command: "ls" }, dir)).toBe(true)
   })
 
   it("treats in-project reads as trusted, out-of-project reads as untrusted", () => {
     expect(isUntrustedSource("read", { filePath: "src/a.ts" }, dir)).toBe(false) // relative → in project
     expect(isUntrustedSource("read", { filePath: "/home/user/project/a.ts" }, dir)).toBe(false)
     expect(isUntrustedSource("read", { filePath: "/etc/passwd" }, dir)).toBe(true)
+    // AM-06: ../ escapes to outside the project are now caught (previously resolved
+    // relative paths were always treated as in-project).
+    expect(isUntrustedSource("read", { filePath: "../../etc/passwd" }, dir)).toBe(true)
   })
 })
 

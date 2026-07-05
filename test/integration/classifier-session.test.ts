@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import { ClassifierSession } from "../../src/auto-mode/stage2"
 import { createMockSdk } from "../helpers/mock-sdk"
 import { compileConfig } from "../../src/config"
@@ -125,21 +125,21 @@ describe("ClassifierSession", () => {
   })
 
   describe("verifyAgent", () => {
+    const logCalls = () => mock.calls.filter((c) => c.method === "log")
+
     it("does not warn when the classifier agent exists", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       await classifier.verifyAgent(baseConfig()) // default agent "general" is in the mock list
-      expect(warn).not.toHaveBeenCalled()
-      warn.mockRestore()
+      expect(logCalls()).toHaveLength(0)
     })
 
-    it("warns once when the classifier agent is missing", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    it("warns once (via the server log, never console) when the classifier agent is missing", async () => {
       const cfg = baseConfig({ classifier: { agent: "ghost-agent" } })
       await classifier.verifyAgent(cfg)
       await classifier.verifyAgent(cfg) // second call is a no-op (once-guard)
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn.mock.calls[0]![0]).toMatch(/ghost-agent/)
-      warn.mockRestore()
+      const warns = logCalls()
+      expect(warns).toHaveLength(1)
+      expect(warns[0]!.args[0]).toBe("warn")
+      expect(String(warns[0]!.args[1])).toMatch(/ghost-agent/)
     })
   })
 

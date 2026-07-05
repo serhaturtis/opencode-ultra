@@ -21,19 +21,22 @@ export function classify(
   params: unknown,
   rules: readonly Stage1Rule[],
 ): Stage1Verdict {
-  const searchString = extractActionString(tool, params)
-  if (!searchString) return "FLAGGED"
+  // AM-03: use the MATCH string (path-only for write tools) so Stage 1 patterns
+  // like .env aren't matched against file content, which caused false FLAGGED.
+  const matchString = extractMatchString(tool, params)
+  if (!matchString) return "FLAGGED"
 
   // Check DENY first — these take priority
   for (const rule of rules) {
     if (rule.verdict !== "DENY") continue
     if (rule.tool !== tool && rule.tool !== "*") continue
-    if (rule.pattern.test(searchString)) return "DENY"
+    if (rule.pattern.test(matchString)) return "DENY"
   }
 
   // A shell command with control operators may do far more than its prefix
   // suggests — never fast-path ALLOW it; let Stage 2 reason about the whole line.
-  if (SHELL_TOOLS.has(tool) && SHELL_CONTROL_OPERATORS.test(searchString)) {
+  const actionString = extractActionString(tool, params)
+  if (SHELL_TOOLS.has(tool) && SHELL_CONTROL_OPERATORS.test(actionString)) {
     return "FLAGGED"
   }
 
@@ -42,14 +45,14 @@ export function classify(
   for (const rule of rules) {
     if (rule.verdict !== "FLAGGED") continue
     if (rule.tool !== tool && rule.tool !== "*") continue
-    if (rule.pattern.test(searchString)) return "FLAGGED"
+    if (rule.pattern.test(matchString)) return "FLAGGED"
   }
 
   // Then ALLOW
   for (const rule of rules) {
     if (rule.verdict !== "ALLOW") continue
     if (rule.tool !== tool && rule.tool !== "*") continue
-    if (rule.pattern.test(searchString)) return "ALLOW"
+    if (rule.pattern.test(matchString)) return "ALLOW"
   }
 
   // Everything else → escalated
@@ -122,6 +125,27 @@ export function extractActionString(tool: string, params: unknown): string {
         return ""
       }
     }
+  }
+}
+
+function extractMatchString(tool: string, params: unknown): string {
+  if (typeof params !== "object" || params === null) return ""
+
+  switch (tool) {
+    case "bash":
+    case "shell":
+      // Match against the command only — the cwd/env suffix breaks $ anchors.
+      return typeof (params as Record<string, unknown>).command === "string"
+        ? (params as Record<string, unknown>).command as string
+        : ""
+    case "write":
+    case "edit":
+    case "apply_patch": {
+      const p = params as Record<string, unknown>
+      return `${tool}:${typeof p.filePath === "string" ? p.filePath : ""}`
+    }
+    default:
+      return extractActionString(tool, params)
   }
 }
 

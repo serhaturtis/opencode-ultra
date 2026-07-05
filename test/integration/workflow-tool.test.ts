@@ -17,6 +17,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { createWorkflowTool } from "../../src/ultracode/workflow-tool"
 import { createWorkflowManagerTool } from "../../src/ultracode/workflow-manager"
+import { WorktreeManager } from "../../src/ultracode/worktree"
 import { createState } from "../../src/state"
 import { compileConfig } from "../../src/config"
 import { createMockSdk } from "../helpers/mock-sdk"
@@ -36,12 +37,14 @@ describe("workflow tool — validate/execute contract", () => {
   let wf: ReturnType<typeof createWorkflowTool>
   let mgr: ReturnType<typeof createWorkflowManagerTool>
   let projectDir: string
+  let worktrees: WorktreeManager
 
   beforeEach(() => {
     config = compileConfig({ ultracode: { enabled: true } })
-    state = createState(() => config)
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-tool-"))
-    wf = createWorkflowTool(createMockSdk().sdk, state, () => config, projectDir)
+    worktrees = new WorktreeManager(projectDir)
+    state = createState(() => config, worktrees)
+    wf = createWorkflowTool(createMockSdk().sdk, state, () => config, projectDir, worktrees)
     mgr = createWorkflowManagerTool(state)
   })
   afterEach(() => { fs.rmSync(projectDir, { recursive: true, force: true }) })
@@ -96,7 +99,7 @@ describe("workflow tool — validate/execute contract", () => {
         return { text: "mock response text", cost: 0, tokens: 0 }
       },
     }
-    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir)
+    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees)
     out(await localWf.execute({ action: "execute", definition: DEF }, ctx)) // returns immediately
     await woke // resolves only when the background run pushes its result
     expect(wakeText).toMatch(/Workflow .* (completed|failed|was stopped)/)
@@ -111,7 +114,7 @@ describe("workflow tool — validate/execute contract", () => {
       ...base.sdk,
       promptSession: async (_sid: string) => { await gate; return { text: "mock response text", cost: 0, tokens: 0 } },
     }
-    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir)
+    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees)
     const id = out(await localWf.execute({ action: "execute", definition: DEF }, ctx)).metadata.workflowId as string
     const view = out(await mgr.execute({ action: "output", workflowId: id }, ctx))
     expect(view.output).toMatch(/running/i)

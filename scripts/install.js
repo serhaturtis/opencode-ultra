@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * install.js — Register opencode-ultra as a plugin in opencode config.
+ * install.js — Install opencode-ultra into the opencode config as a SELF-CONTAINED
+ * plugin (bundled code + command/skills/agent assets), then register its path.
+ * Nothing points back at the source repo, so the repo can be deleted after install.
  *
  * Usage:
- *   node scripts/install.js              # Install as npm package "opencode-ultra"
- *   node scripts/install.js --local      # Install from current directory (local dev)
- *   node scripts/install.js --global     # Install to global config (~/.config/opencode/)
+ *   node scripts/install.js              # Install into the current project's .opencode/
+ *   node scripts/install.js --global     # Install into ~/.config/opencode (recommended)
+ *   node scripts/install.js --enable     # also enable autoMode + ultracode in the config
  *   node scripts/install.js --dry-run    # Show what would be done without doing it
  *
  * Non-destructive: creates a .backup copy before modifying any config file.
- * Also works as "uninstall.js" when symlinked/copied under that name.
+ * Also works as "uninstall.js" when invoked under that name.
  */
 
 import * as fs from "node:fs"
@@ -26,7 +28,6 @@ const ASSET_DIRS = ["command", "skills", "agent"]
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2)
-const isLocal = args.includes("--local")
 const isGlobal = args.includes("--global")
 const isDryRun = args.includes("--dry-run")
 const isEnable = args.includes("--enable")
@@ -34,16 +35,29 @@ const isUninstall = process.argv[1]?.includes("uninstall") ?? false
 
 const PLUGIN_NAME = "opencode-ultra"
 
-// The canonical plugin reference. For a local build it MUST be the built ESM
-// file: opencode imports plugins as ES modules, and ESM cannot import a directory
-// (ERR_UNSUPPORTED_DIR_IMPORT). For an npm install, the package name resolves to
-// dist/index.js via package.json "main".
-const pluginRef = isLocal ? path.join(PACKAGE_ROOT, "dist", "index.js") : PLUGIN_NAME
+/** The opencode config dir we install into: global (~/.config/opencode) or a project's .opencode. */
+function configDir() {
+  return isGlobal ? path.join(os.homedir(), ".config", "opencode") : path.join(process.cwd(), ".opencode")
+}
 
-// Every local form this plugin might have been registered as — so install/uninstall
-// can self-heal stale or wrong entries (e.g. an old dist/plugin/index.js or a bare
-// directory path) instead of leaving duplicates that break opencode startup.
+/**
+ * Where the SELF-CONTAINED plugin is installed — a stable dir inside the opencode
+ * config, holding the bundled index.js + a package.json. This is the whole point:
+ * the plugin no longer references the repo, so the repo can be deleted after install.
+ */
+function pluginInstallDir() {
+  return path.join(configDir(), PLUGIN_NAME)
+}
+
+// The canonical plugin reference: the absolute path to the installed, self-contained
+// plugin dir (a directory with package.json → opencode resolves main = index.js).
+const pluginRef = pluginInstallDir()
+
+// Every OTHER form this plugin may have been registered as — stripped on install
+// and uninstall so configs from earlier versions self-heal instead of leaving stale
+// entries (the bare package name, or paths into a now-deleted repo).
 const localRefs = [
+  PLUGIN_NAME,
   PACKAGE_ROOT,
   path.join(PACKAGE_ROOT, "dist", "index.js"),
   path.join(PACKAGE_ROOT, "dist", "plugin", "index.js"),
@@ -150,14 +164,44 @@ function writeConfig(filePath, _prev, next, action, backupExisting) {
  * copied INTO the active config dir — global (~/.config/opencode) or a project's
  * own .opencode/ — or they never load. The repo itself carries no .opencode/.
  */
-function assetTargetDir() {
-  return isGlobal
-    ? path.join(os.homedir(), ".config", "opencode")
-    : path.join(process.cwd(), ".opencode")
+/**
+ * Copy the SELF-CONTAINED bundle (dist/index.js — esbuild output with all runtime
+ * deps inlined) plus a tiny package.json into the install dir. After this, nothing
+ * the plugin loads points back at the repo, so the repo can be deleted.
+ */
+function installPluginCode() {
+  const bundle = path.join(PACKAGE_ROOT, "dist", "index.js")
+  if (!fs.existsSync(bundle)) {
+    console.error("✗ dist/index.js not found — run `npm run build` (esbuild bundle) before installing.")
+    process.exit(1)
+  }
+  const dir = pluginInstallDir()
+  const version = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf-8")).version
+  const manifest = { name: PLUGIN_NAME, version, type: "module", main: "index.js" }
+  if (isDryRun) {
+    console.log(`[DRY RUN] Would install self-contained plugin -> ${dir}`)
+    return
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  fs.copyFileSync(bundle, path.join(dir, "index.js"))
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(manifest, null, 2) + "\n", "utf-8")
+  console.log(`✓ ${dir} — self-contained plugin installed`)
+}
+
+/** Remove the installed plugin dir (uninstall). */
+function removePluginCode() {
+  const dir = pluginInstallDir()
+  if (!fs.existsSync(dir)) return
+  if (isDryRun) {
+    console.log(`[DRY RUN] Would remove ${dir}`)
+    return
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
+  console.log(`✓ removed ${dir}`)
 }
 
 function installAssets() {
-  const targetRoot = assetTargetDir()
+  const targetRoot = configDir()
 
   for (const sub of ASSET_DIRS) {
     const src = path.join(PACKAGE_ROOT, sub)
@@ -233,6 +277,7 @@ if (configFiles.length === 0) {
 
   const result = addPlugin(defaultPath)
   printResult(result)
+  installPluginCode()
   installAssets()
   process.exit(0)
 }
@@ -247,6 +292,9 @@ for (const file of configFiles) {
   printResult(result)
 }
 
-if (!isUninstall) {
+if (isUninstall) {
+  removePluginCode()
+} else {
+  installPluginCode()
   installAssets()
 }

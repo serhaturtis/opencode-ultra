@@ -10,6 +10,8 @@ import { tool } from "@opencode-ai/plugin"
 import { type ISdkClient } from "../sdk-client.js"
 import {
   type CompiledConfig,
+  type Metrics,
+  type NarrationSink,
   type UltraState,
   type ValidationResult,
   type WorkflowControl,
@@ -18,12 +20,14 @@ import {
   type WorkflowProgress,
 } from "../contracts.js"
 import { parse } from "./parser.js"
-import { WorkflowEngine } from "./engine.js"
+import { WorkflowValidator } from "./validator.js"
+import { WorkflowExecutor } from "./executor.js"
 import { Budget } from "./budget.js"
 import { FileJournal } from "./journal.js"
-import { WorktreeManager } from "./worktree.js"
 import { renderProgress } from "./workflow-manager.js"
+import { WorktreeManager } from "./worktree.js"
 import { completeJob } from "../state.js"
+import { LogMetrics } from "../metrics.js"
 import { WorkflowLimitError, WorkflowNotFoundError, WorkflowParseError } from "../errors.js"
 
 export function createWorkflowTool(
@@ -31,6 +35,7 @@ export function createWorkflowTool(
   state: UltraState,
   getConfig: () => CompiledConfig,
   projectDir: string,
+  worktrees: WorktreeManager,
 ) {
   return tool({
     description: `Orchestrate multi-stage, multi-agent workflows.
@@ -65,8 +70,8 @@ structured output; verify/loop consume the flattened findings.`,
       const config = getConfig()
       switch (args.action) {
         case "validate": return handleValidate(args, sdk, ctx, config)
-        case "execute": return handleExecute(args, sdk, ctx, state, config, projectDir)
-        case "resume": return handleResume(args, sdk, ctx, state, config, projectDir)
+        case "execute": return handleExecute(args, sdk, ctx, state, config, projectDir, worktrees)
+        case "resume": return handleResume(args, sdk, ctx, state, config, projectDir, worktrees)
         default: throw new Error(`Unknown action '${args.action}'. Use 'validate', 'execute', or 'resume'.`)
       }
     },
@@ -91,10 +96,12 @@ function parseAndValidate(
     if (err instanceof WorkflowParseError) return { invalid: output("Workflow validation: INVALID", err.message) }
     throw err
   }
-  const engine = new WorkflowEngine(sdk, ctx.sessionID, config.ultracode)
-  const result = engine.validate(parsed)
-  if (!result.valid) return { invalid: output("Workflow validation: INVALID", formatValidation(result)) }
-  return { result, def: engine.buildDef(parsed, [])! }
+  const validator = new WorkflowValidator(config.ultracode)
+  const { result: partial, def } = validator.validate(parsed)
+  if (!partial.valid || !def) return { invalid: output("Workflow validation: INVALID", formatValidation(partial)) }
+  // The id is a job-level concern (the tool layer), not a validation concern.
+  const result: ValidationResult = { ...partial, id: crypto.randomUUID().slice(0, 8) }
+  return { result, def }
 }
 
 // ── validate (pure dry run: preview + cost, no execution, no state) ────────────
@@ -120,13 +127,14 @@ function handleExecute(
   state: UltraState,
   config: CompiledConfig,
   projectDir: string,
+  worktrees: WorktreeManager,
 ): ToolOutput {
   if (!args.definition) throw new Error("'definition' is required for the execute action.")
   const checked = parseAndValidate(args.definition, sdk, ctx, config)
   if ("invalid" in checked) return checked.invalid
 
   enforceConcurrency(state, config)
-  const job = makeJob(checked.result.id, checked.def, sdk, ctx.sessionID, state, config, projectDir)
+  const job = makeJob(checked.result.id, checked.def, sdk, ctx.sessionID, state, config, projectDir, worktrees)
   state.workflows.jobs.set(job.id, job)
   void job.execute() // runs in the background; notifies the session on completion
   return startedOutput(job)
@@ -139,6 +147,7 @@ async function handleResume(
   state: UltraState,
   config: CompiledConfig,
   projectDir: string,
+  worktrees: WorktreeManager,
 ): Promise<ToolOutput> {
   if (!args.workflowId) throw new Error("'workflowId' is required for the resume action")
 
@@ -148,7 +157,7 @@ async function handleResume(
     const journalDir = path.join(projectDir, config.ultracode.journalDir)
     const stored = await FileJournal.read(journalDir, args.workflowId)
     if (!stored) throw new WorkflowNotFoundError(args.workflowId)
-    job = makeJob(args.workflowId, stored.def, sdk, ctx.sessionID, state, config, projectDir)
+    job = makeJob(args.workflowId, stored.def, sdk, ctx.sessionID, state, config, projectDir, worktrees)
     state.workflows.jobs.set(job.id, job)
   }
   if (job.status === "running") throw new Error(`Workflow ${args.workflowId} is already running`)
@@ -175,33 +184,34 @@ function makeJob(
   state: UltraState,
   config: CompiledConfig,
   projectDir: string,
+  worktrees: WorktreeManager,
 ): WorkflowJob {
-  const engine = new WorkflowEngine(sdk, parentSessionId, config.ultracode)
+  const narration: NarrationSink = makeNarrationSink(sdk, parentSessionId)
+  const executor = new WorkflowExecutor(sdk, parentSessionId, config.ultracode, narration)
+
   const progress: WorkflowProgress = { stageIndex: 0, totalStages: def.stages.length, agents: [] }
   const control: WorkflowControl = {
     shouldStop: () => job.status === "cancelled",
     isPaused: () => job.status === "paused",
     now: () => Date.now(),
   }
-
+  const metrics = new LogMetrics(sdk)
   const job: WorkflowJob = {
     id,
     title: def.title || def.stages.map((s) => s.name).join(" → "),
     def,
+    parentSessionId,
     status: "pending",
     progress,
     result: undefined,
     budget: undefined,
     execute: async () => {
       job.status = "running"
-      const budget = new Budget(
-        config.ultracode.workflowRuntime.maxCostUsd,
-        config.ultracode.workflowRuntime.maxTotalAgents,
-      )
+      const rt = config.ultracode.workflowRuntime
+      const budget = new Budget(rt.maxCostUsd, rt.maxTotalAgents, rt.agentCostCapUsd)
       try {
-        const journal = await FileJournal.open(path.join(projectDir, config.ultracode.journalDir), id, def)
-        const worktrees = new WorktreeManager(projectDir)
-        const { summary } = await engine.execute(def, { control, progress, budget, journal, worktrees })
+        const journal = await FileJournal.open(path.join(projectDir, config.ultracode.journalDir), id, def, (l, m) => sdk.log(l, m), rt.maxJournalFiles)
+        const { summary } = await executor.execute(def, { control, progress, budget, metrics, journal, worktrees })
         job.result = summary
         job.budget = budget.report()
         if ((job.status as string) !== "cancelled") job.status = "completed"
@@ -252,20 +262,34 @@ function startedOutput(job: WorkflowJob): ToolOutput {
   }
 }
 
-/**
- * Re-engage the parent session with the finished result so the model is notified
- * without polling — one wake, at completion. Best-effort: a busy/gone session
- * just means the result is still available via the manager.
- */
-async function notifyCompletion(sdk: ISdkClient, parentSessionId: string, job: WorkflowJob): Promise<void> {
-  const verb = job.status === "cancelled" ? "was stopped" : job.status === "error" ? "failed" : "completed"
-  await sdk.promptSession(parentSessionId, {
-    parts: [{ type: "text", text: `[ultracode] Workflow ${job.id} "${job.title}" ${verb}.\n\n${job.result ?? ""}` }],
-    noReply: false,
-  }).catch(() => { /* parent session busy or gone */ })
+/** Fire-and-forget narration: detach required (executor blocks the parent session). Drops logged. */
+function makeNarrationSink(sdk: ISdkClient, parentSessionId: string): NarrationSink {
+  return {
+    inject(message) {
+      void sdk.promptSession(parentSessionId, {
+        parts: [{ type: "text", synthetic: true, text: message }],
+        noReply: true,
+      }).catch((err) => {
+        sdk.log("warn", `workflow narration dropped: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    },
+  }
 }
 
-function formatValidation(result: ValidationResult): string {
+/** Re-engage the parent session on completion. Drops logged. */
+async function notifyCompletion(sdk: ISdkClient, parentSessionId: string, job: WorkflowJob): Promise<void> {
+  const verb = job.status === "cancelled" ? "was stopped" : job.status === "error" ? "failed" : "completed"
+  try {
+    await sdk.promptSession(parentSessionId, {
+      parts: [{ type: "text", text: `[ultracode] Workflow ${job.id} "${job.title}" ${verb}.\n\n${job.result ?? ""}` }],
+      noReply: false,
+    })
+  } catch (err) {
+    sdk.log("warn", `workflow ${job.id} completion notification dropped: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+function formatValidation(result: Omit<ValidationResult, "id">): string {
   const lines = [`Stages: ${result.stages} | Agents: ${result.agents} | Max concurrent: ${result.maxConcurrent}`, ""]
   for (const error of result.errors) lines.push(`  ISSUE: ${error}`)
   if (result.errors.length > 0) lines.push("")

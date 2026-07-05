@@ -16,6 +16,10 @@ export function createMockSdk(): { sdk: ISdkClient; calls: MockCall[] } {
   const calls: MockCall[] = []
 
   const sdk: ISdkClient = {
+    log(level, message) {
+      calls.push({ method: "log", args: [level, message] })
+    },
+
     async createSession(parentId, title, directory) {
       calls.push({ method: "createSession", args: [parentId, title, directory] })
       return `session-${calls.length}`

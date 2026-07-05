@@ -15,14 +15,16 @@ export function parse(source: string): ParsedWorkflow {
   const trimmed = source.trim()
   if (!trimmed) throw new WorkflowParseError("Empty workflow definition", [])
 
-  const value = tryJson(trimmed) ?? tryJsLiteral(trimmed)
-  if (value === undefined) {
-    throw new WorkflowParseError(
-      'Could not parse a workflow. Provide JSON ({"title": "...", "stages": [...]}) or JS (export const workflow = {...}).',
-      [],
-    )
-  }
-  return normalize(value)
+  const jsonResult = tryJson(trimmed)
+  if (jsonResult.value !== undefined) return normalize(jsonResult.value)
+
+  const jsResult = tryJsLiteral(trimmed)
+  if (jsResult !== undefined) return normalize(jsResult)
+
+  throw new WorkflowParseError(
+    `Could not parse workflow. JSON: ${jsonResult.error ?? "valid JSON, but not a workflow shape (missing 'stages' array)"}. JS literal path also failed.`,
+    [],
+  )
 }
 
 function normalize(value: unknown): ParsedWorkflow {
@@ -38,11 +40,11 @@ function normalize(value: unknown): ParsedWorkflow {
 
 // ── JSON / JS literal extraction ──────────────────────────────────────────────
 
-function tryJson(source: string): unknown | undefined {
+function tryJson(source: string): { value: unknown; error?: string } {
   try {
-    return JSON.parse(source)
-  } catch {
-    return undefined
+    return { value: JSON.parse(source) }
+  } catch (err) {
+    return { value: undefined, error: err instanceof SyntaxError ? err.message : String(err) }
   }
 }
 
@@ -85,11 +87,16 @@ function singleToDoubleQuoted(lit: string): string {
   const inner = lit.slice(1, -1)
   let out = ""
   for (let i = 0; i < inner.length; i++) {
-    const ch = inner[i]
+    const ch = inner[i]!
     if (ch === "\\") {
       const next = inner[i + 1] ?? ""
-      out += next === "'" ? "'" : "\\" + next
       i++
+      out += next === "'" ? "'"
+        : next === "\\" || next === '"' ? "\\" + next
+        : next === "n" ? "\n"
+        : next === "t" ? "\t"
+        : next === "r" ? "\r"
+        : "\\" + next // unknown escape — keep as-is
     } else if (ch === '"') {
       out += '\\"'
     } else {

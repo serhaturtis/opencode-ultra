@@ -41,7 +41,17 @@ export interface AgentRun {
 
 // ── Interface ────────────────────────────────────────────────────────────────
 
+export type LogLevel = "debug" | "info" | "warn" | "error"
+
 export interface ISdkClient {
+  /**
+   * Write a diagnostic to opencode's SERVER log (the `/log` endpoint), NOT to
+   * stdout/stderr. The plugin runs in opencode's process; writing to the console
+   * leaks raw text into the terminal and corrupts the TUI. Best-effort and
+   * non-throwing — logging must never break a hook.
+   */
+  log(level: LogLevel, message: string): void
+
   /** Create a child session, optionally rooted at a different working directory. Returns the new session ID. */
   createSession(parentId: string, title: string, directory?: string): Promise<string>
 

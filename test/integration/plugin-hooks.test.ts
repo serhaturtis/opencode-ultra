@@ -6,7 +6,7 @@
  * This is the layer that previously hid real-API mismatches; it now also pins the
  * per-session behavior (state keyed by sessionID, chat.message capture, etc.).
  */
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import plugin from "../../src/index"
 
 function makeFakeClient() {
@@ -98,6 +98,21 @@ describe("plugin: permission.ask enforces cached verdicts", () => {
     const out = { status: "ask" as const }
     await hooks["permission.ask"]({ sessionID: "x", callID: "c2" }, out)
     expect(out.status).toBe("deny")
+  })
+
+  it("never writes to the terminal (console) — that would corrupt opencode's TUI", async () => {
+    const spies = (["log", "warn", "error", "info", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    )
+    try {
+      const { hooks } = await makePlugin(ENABLED) // init (incl. classifier verify) must not console
+      // A denial — the one path that used to console.warn an audit line.
+      await hooks["tool.execute.before"]({ tool: "bash", sessionID: "x", callID: "c4" }, { args: { command: "rm -rf /" } })
+        .catch(() => {})
+      for (const s of spies) expect(s).not.toHaveBeenCalled()
+    } finally {
+      for (const s of spies) s.mockRestore()
+    }
   })
 
   it("routes a FLAGGED action through the classifier and unwraps the response", async () => {
