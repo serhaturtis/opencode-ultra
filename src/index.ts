@@ -41,7 +41,7 @@ export default (async function opencodeUltra(input, options) {
 
   return {
     tool: {
-      workflow: createWorkflowTool(sdk, state, () => config, directory, worktrees),
+      workflow: createWorkflowTool(sdk, state, () => config, directory, worktrees, metrics),
       "workflow-manager": createWorkflowManagerTool(state),
     },
 

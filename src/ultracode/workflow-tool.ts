@@ -37,6 +37,7 @@ export function createWorkflowTool(
   getConfig: () => CompiledConfig,
   projectDir: string,
   worktrees: WorktreeManager,
+  metrics: Metrics,
 ) {
   return tool({
     description: `Orchestrate multi-stage, multi-agent workflows.
@@ -73,8 +74,8 @@ structured output; verify/loop consume the flattened findings.`,
       const config = getConfig()
       switch (args.action) {
         case "validate": return handleValidate(args, sdk, ctx, config)
-        case "execute": return handleExecute(args, sdk, ctx, state, config, projectDir, worktrees)
-        case "resume": return handleResume(args, sdk, ctx, state, config, projectDir, worktrees)
+        case "execute": return handleExecute(args, sdk, ctx, state, config, projectDir, worktrees, metrics)
+        case "resume": return handleResume(args, sdk, ctx, state, config, projectDir, worktrees, metrics)
         default: throw new Error(`Unknown action '${args.action}'. Use 'validate', 'execute', or 'resume'.`)
       }
     },
@@ -131,13 +132,14 @@ function handleExecute(
   config: CompiledConfig,
   projectDir: string,
   worktrees: WorktreeManager,
+  metrics: Metrics,
 ): ToolOutput {
   if (!args.definition) throw new Error("'definition' is required for the execute action.")
   const checked = parseAndValidate(args.definition, sdk, ctx, config)
   if ("invalid" in checked) return checked.invalid
 
   enforceConcurrency(state, config)
-  const job = makeJob(checked.result.id, checked.def, sdk, ctx.sessionID, state, config, projectDir, worktrees)
+  const job = makeJob(checked.result.id, checked.def, sdk, ctx.sessionID, state, config, projectDir, worktrees, metrics)
   state.workflows.jobs.set(job.id, job)
   void job.execute() // runs in the background; notifies the session on completion
   return startedOutput(job)
@@ -151,6 +153,7 @@ async function handleResume(
   config: CompiledConfig,
   projectDir: string,
   worktrees: WorktreeManager,
+  metrics: Metrics,
 ): Promise<ToolOutput> {
   if (!args.workflowId) throw new Error("'workflowId' is required for the resume action")
 
@@ -160,7 +163,7 @@ async function handleResume(
     const journalDir = path.join(projectDir, config.ultracode.journalDir)
     const stored = await FileJournal.read(journalDir, args.workflowId)
     if (!stored) throw new WorkflowNotFoundError(args.workflowId)
-    job = makeJob(args.workflowId, stored.def, sdk, ctx.sessionID, state, config, projectDir, worktrees)
+    job = makeJob(args.workflowId, stored.def, sdk, ctx.sessionID, state, config, projectDir, worktrees, metrics)
     state.workflows.jobs.set(job.id, job)
   }
   if (job.status === "running") throw new Error(`Workflow ${args.workflowId} is already running`)
@@ -191,6 +194,7 @@ function makeJob(
   config: CompiledConfig,
   projectDir: string,
   worktrees: WorktreeManager,
+  metrics: Metrics,
 ): WorkflowJob {
   const narration: NarrationSink = makeNarrationSink(sdk, parentSessionId)
   const executor = new WorkflowExecutor(sdk, parentSessionId, config.ultracode, narration)
@@ -201,7 +205,6 @@ function makeJob(
     isPaused: () => job.status === "paused",
     now: () => Date.now(),
   }
-  const metrics = new LogMetrics(sdk)
   const job: WorkflowJob = {
     id,
     title: def.title || def.stages.map((s) => s.name).join(" → "),

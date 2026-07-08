@@ -327,6 +327,13 @@ export interface NarrationSink {
   inject(message: string): void
 }
 
+/** Classifier: Stage 2 classification + injection detection. ClassifierSession implements. */
+export interface Classifier {
+  verifyAgent(config: CompiledAutoModeConfig): Promise<void>
+  classify(request: ClassificationRequest, config: CompiledAutoModeConfig): Promise<Stage2Classification>
+  detectInjection(content: string, config: CompiledAutoModeConfig): Promise<boolean>
+}
+
 /**
  * Structured observability. Emits events the plugin's host can consume
  * (the opencode server log, forwarded to monitoring). All methods are
@@ -377,8 +384,9 @@ export interface WorkflowState {
 export interface SessionState {
   readonly autoMode: AutoModeState
   readonly ultracode: UltracodeState
-  /** Session creation time (ms). Used by the session store for TTL eviction. */
   readonly createdAt: number
+  /** Updated on every get()/peek(); eviction uses this, not createdAt. */
+  lastAccessed: number
 }
 
 /** Owns per-session state, keyed by sessionID. */

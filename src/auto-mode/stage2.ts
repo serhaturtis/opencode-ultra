@@ -9,6 +9,7 @@
 import { type ISdkClient } from "../sdk-client.js"
 import {
   type ClassificationRequest,
+  type Classifier,
   type CompiledAutoModeConfig,
   type Stage2Classification,
 } from "../contracts.js"
@@ -17,7 +18,7 @@ import { formatBoundaries } from "./boundaries.js"
 // Each call runs in a fresh throwaway session with tools disabled and no history.
 // Must NOT pass noReply — the model must reply with a verdict.
 
-export class ClassifierSession {
+export class ClassifierSession implements Classifier {
   private verified = false
 
   constructor(private readonly sdk: ISdkClient) {}

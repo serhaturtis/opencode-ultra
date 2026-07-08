@@ -22,6 +22,7 @@ import { createState } from "../../src/state"
 import { compileConfig } from "../../src/config"
 import { TtlVerdictCache } from "../../src/auto-mode/verdict-cache"
 import { createMockSdk } from "../helpers/mock-sdk"
+import { NoopMetrics } from "../../src/metrics"
 import type { CompiledConfig, UltraState } from "../../src/contracts"
 
 const ctx = { sessionID: "parent" } as never
@@ -45,7 +46,7 @@ describe("workflow tool — validate/execute contract", () => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-tool-"))
     worktrees = new WorktreeManager(projectDir)
     state = createState(() => config, worktrees, (ttlMs) => new TtlVerdictCache(ttlMs))
-    wf = createWorkflowTool(createMockSdk().sdk, state, () => config, projectDir, worktrees)
+    wf = createWorkflowTool(createMockSdk().sdk, state, () => config, projectDir, worktrees, NoopMetrics)
     mgr = createWorkflowManagerTool(state)
   })
   afterEach(() => { fs.rmSync(projectDir, { recursive: true, force: true }) })
@@ -100,7 +101,7 @@ describe("workflow tool — validate/execute contract", () => {
         return { text: "mock response text", cost: 0, tokens: 0 }
       },
     }
-    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees)
+    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees, NoopMetrics)
     out(await localWf.execute({ action: "execute", definition: DEF }, ctx)) // returns immediately
     await woke // resolves only when the background run pushes its result
     expect(wakeText).toMatch(/Workflow .* (completed|failed|was stopped)/)
@@ -115,7 +116,7 @@ describe("workflow tool — validate/execute contract", () => {
       ...base.sdk,
       promptSession: async (_sid: string) => { await gate; return { text: "mock response text", cost: 0, tokens: 0 } },
     }
-    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees)
+    const localWf = createWorkflowTool(sdk as never, state, () => config, projectDir, worktrees, NoopMetrics)
     const id = out(await localWf.execute({ action: "execute", definition: DEF }, ctx)).metadata.workflowId as string
     const view = out(await mgr.execute({ action: "output", workflowId: id }, ctx))
     expect(view.output).toMatch(/running/i)

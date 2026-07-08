@@ -42,14 +42,13 @@ function createSessionStore(getConfig: () => CompiledConfig, verdictCacheFactory
     if (now - lastSweep > 60_000) { evictExpired(sessions, now, SESSION_TTL_MS); lastSweep = now }
   }
   return {
-    peek: (sessionID) => { maybeSweep(); return sessions.get(sessionID) },
+    peek: (sessionID) => { maybeSweep(); const s = sessions.get(sessionID); if (s) s.lastAccessed = Date.now(); return s },
     get(sessionID) {
       let state = sessions.get(sessionID)
-      if (!state) {
-        maybeSweep()
-        state = createSessionState(getConfig(), verdictCacheFactory)
-        sessions.set(sessionID, state)
-      }
+      if (state) { state.lastAccessed = Date.now(); return state }
+      maybeSweep()
+      state = createSessionState(getConfig(), verdictCacheFactory)
+      sessions.set(sessionID, state)
       return state
     },
     remove: (sessionID) => { sessions.delete(sessionID) },
@@ -59,7 +58,7 @@ function createSessionStore(getConfig: () => CompiledConfig, verdictCacheFactory
 
 function evictExpired(sessions: Map<string, SessionState>, now: number, ttlMs: number): void {
   for (const [id, s] of sessions) {
-    if (now - s.createdAt > ttlMs) sessions.delete(id)
+    if (now - s.lastAccessed > ttlMs) sessions.delete(id)
   }
 }
 
@@ -67,6 +66,7 @@ function createSessionState(config: CompiledConfig, verdictCacheFactory: (ttlMs:
   const auto = config.autoMode
   return {
     createdAt: Date.now(),
+    lastAccessed: Date.now(),
     autoMode: {
       // New sessions start active only when auto mode is both enabled and default.
       active: auto.enabled && auto.defaultMode,

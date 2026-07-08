@@ -5,6 +5,7 @@
  *  3. Classifier confirmation — only confirmed injections get a warning banner.
  */
 import * as path from "node:path"
+import { realpathSync } from "node:fs"
 
 const INJECTION_PATTERNS: readonly RegExp[] = Object.freeze([
   /ignore\s+(all\s+)?(previous|prior|above|foregoing)\s+(instructions?|directives?|prompts?)/i,
@@ -60,8 +61,9 @@ function readPath(args: unknown): string | undefined {
 function isOutsideProject(filePath: string | undefined, projectDir: string): boolean {
   if (!filePath) return false
   const root = path.resolve(projectDir)
-  // Resolve relative paths against the project root (../ escapes previously
-  // slipped through because `!isAbsolute` returned early and trusted them).
   const resolved = path.resolve(root, filePath)
-  return resolved !== root && !resolved.startsWith(root + path.sep)
+  // Resolve symlinks so a symlink pointing outside the project is detected.
+  let realPath = resolved
+  try { realPath = realpathSync(resolved) } catch { /* file may not exist yet; use resolved */ }
+  return realPath !== root && !realPath.startsWith(root + path.sep)
 }

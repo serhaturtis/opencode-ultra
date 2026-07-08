@@ -2,6 +2,7 @@ import type { HookInput, HookOutput } from "./types.js"
 import type { PluginContext } from "./context.js"
 import {
   type AutoModeState,
+  type Classifier,
   type CompiledConfig,
   type FinalVerdict,
   type Metrics,
@@ -9,7 +10,6 @@ import {
 } from "../contracts.js"
 import { type ISdkClient } from "../sdk-client.js"
 import { classify, extractActionString, isToolAlwaysSafe } from "../auto-mode/stage1.js"
-import { ClassifierSession } from "../auto-mode/stage2.js"
 import { recordApproval, recordDenial } from "../auto-mode/fallback.js"
 import { ToolDeniedError } from "../errors.js"
 import { INJECTION_WARNING, isUntrustedSource, looksLikeInjection } from "../auto-mode/probe.js"
@@ -88,7 +88,7 @@ async function resolveVerdict(
   args: unknown,
   config: CompiledConfig,
   auto: AutoModeState,
-  classifier: ClassifierSession,
+  classifier: Classifier,
   sdk: ISdkClient,
   metrics: Metrics,
 ): Promise<Stage2Classification> {
