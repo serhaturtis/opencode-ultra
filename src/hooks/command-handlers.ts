@@ -17,6 +17,7 @@ export async function onCommand(
   else if (cmd === "workflows") message = formatWorkflowList(ctx.state)
   if (message === undefined) return
   output.parts.length = 0
+  // Plugin creates a minimal text part — the SDK's runtime fills in id/sessionID/messageID.
   output.parts.push({ type: "text", text: message } as Part)
 }
 

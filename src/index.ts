@@ -26,6 +26,9 @@ export default (async function opencodeUltra(input, options) {
   const { client, directory } = input
   const sdk: ISdkClient = createRealSdkClient(client)
 
+  // Plugin options arrive as Record<string,unknown> (the SDK's PluginOptions type).
+  // The double-cast is the boundary where runtime JSON becomes typed config.
+  // Missing/extra keys are handled by the compiler's ?? defaults, not by validation.
   const raw = (options && typeof options === "object" ? options : {}) as Record<string, unknown>
   const config: CompiledConfig = compileConfig(raw as unknown as RawOpenCodeUltraConfig)
   for (const w of config.warnings) sdk.log("warn", w)

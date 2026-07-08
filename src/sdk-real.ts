@@ -15,6 +15,9 @@ import type { ISdkClient } from "./sdk-client.js"
 import { errMsg } from "./util.js"
 
 export function createRealSdkClient(client: OpencodeClient): ISdkClient {
+  // Boundary cast: the SDK's OpencodeClient type has methods that exist at
+  // runtime but are not reflected in the TypeScript types. The any-cast is
+  // the single point of adaptation — all further access goes through ISdkClient.
   const c = client as any
 
   return {
