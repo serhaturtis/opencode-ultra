@@ -137,4 +137,37 @@ describe("WorkflowExecutor.execute", () => {
     const { results } = await exec(def)
     expect(results.a!.agents[0]!.status).toBe("error")
   })
+
+  it("verify with lenses uses lenses.length voters", async () => {
+    ;(mock.sdk as any).promptSession = async (_: string, o: any): Promise<AgentRun> => {
+      if (o.noReply) return { text: "", cost: 0, tokens: 0 }
+      if (o.parts?.[0]?.text?.includes("lens A")) return { text: `{"refuted":true,"reason":"bad"}`, cost: 0, tokens: 0 }
+      return { text: `{"findings":[{"id":"f1","desc":"x"}]}`, cost: 0, tokens: 0 }
+    }
+    const schema = { fields: { findings: { type: "array" as const, required: true, items: { fields: { id: { type: "string" as const } } } } } }
+    const def: WorkflowDef = { title: "T", stages: [
+      { kind: "fanout", name: "find", agents: [{ name: "f", task: "find", agent: "explore", schema }] },
+      { kind: "verify", name: "ck", source: "find", task: "verify {{finding}}", agent: "general", voters: 1, lenses: ["lens A"], refuteThreshold: 1 },
+    ] }
+    const { results } = await exec(def)
+    expect(results.ck!.agents).toHaveLength(1)
+    expect(results.ck!.findings).toHaveLength(0)
+  })
+
+  it("workflowTimeout stops execution mid-stage", async () => {
+    ;(mock.sdk as any).promptSession = async (_: string, o: any): Promise<AgentRun> => {
+      if (o.noReply) return { text: "", cost: 0, tokens: 0 }
+      return { text: "done", cost: 0, tokens: 0 }
+    }
+    const def: WorkflowDef = { title: "T", stages: [
+      { kind: "fanout", name: "a", agents: [{ name: "x", task: "t", agent: "explore" }] },
+    ] }
+    let t = 0
+    await executor.execute(def, {
+      control: { now: () => { t += 3_600_001; return t } },
+      progress: freshProgress(def), budget: new Budget(0),
+    })
+    // First now() sets startedAt to 3_600_001, second sets now to 7_200_002 => diff > 3_600_000 => timed out
+    expect(mock.calls.filter((c) => c.method === "createSession")).toHaveLength(0)
+  })
 })

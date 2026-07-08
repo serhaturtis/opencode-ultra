@@ -66,9 +66,12 @@ describe("onCompacting", () => {
 })
 
 describe("onDispose", () => {
-  it("shuts down workflow state", async () => {
+  it("shuts down workflow state and clears the job registry", async () => {
     const ctx = makeCtx()
+    // Place a job so shutdown has something to stop.
+    const job = { id: "w1", title: "t", parentSessionId: "s1", status: "running" as const, stop() {} } as any
+    ctx.state.workflows.jobs.set("w1", job)
     await onDispose(ctx)
-    // shutdown is best-effort — just verify it resolves without throwing
+    expect(ctx.state.workflows.jobs.size).toBe(0)
   })
 })

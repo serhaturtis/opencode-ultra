@@ -47,4 +47,23 @@ describe("summarize", () => {
     const out = summarize(def, results, DEFAULT_ULTRACODE_CONFIG, budget)
     expect(out).toContain("1 finding(s)")
   })
+
+  it("does not deduplicate when deduplicate is false", () => {
+    const cfg = { ...DEFAULT_ULTRACODE_CONFIG, summarization: { ...DEFAULT_ULTRACODE_CONFIG.summarization, deduplicate: false } }
+    const results: WorkflowResults = {
+      audit: { stage: "audit", kind: "fanout", agents: [], findings: [{ id: "1" }, { id: "1" }] },
+    }
+    expect(summarize(def, results, cfg, budget)).toContain("2 finding(s)")
+  })
+
+  it("truncates agent output at max chars", () => {
+    const cfg = { ...DEFAULT_ULTRACODE_CONFIG, summarization: { ...DEFAULT_ULTRACODE_CONFIG.summarization, agentResultMaxChars: 5 } }
+    const longText = "a".repeat(1000)
+    const results: WorkflowResults = {
+      audit: { stage: "audit", kind: "fanout", agents: [{ name: "a", status: "completed" as const, text: longText, cost: 0, tokens: 0 }], findings: [] },
+    }
+    const out = summarize(def, results, cfg, budget)
+    expect(out).toContain("aaaaa") // truncated, not full 1000 chars
+    expect(out).not.toContain(longText)
+  })
 })
