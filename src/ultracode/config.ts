@@ -30,9 +30,20 @@ export const DEFAULT_ULTRACODE_CONFIG: UltracodeConfig = deepFreeze({
   journalDir: ".opencode-ultra/journal",
 })
 
-/** Compile raw ultracode config from opencode.json into the immutable UltracodeConfig. */
-export function compileUltracodeConfig(raw: RawUltracodeConfig): UltracodeConfig {
+/** Compile raw ultracode config; `warnings` accumulates non-fatal config issues. */
+export function compileUltracodeConfig(raw: RawUltracodeConfig, warnings: string[]): UltracodeConfig {
   const d = DEFAULT_ULTRACODE_CONFIG
+  const validate = (key: string, val: number, min: number, label: string) => {
+    if (val < min) warnings.push(`ultracode.workflowRuntime.${key}: ${label} must be >= ${min} (got ${val}); using default ${d.workflowRuntime[key as keyof typeof d.workflowRuntime]}`)
+  }
+  const rt = raw.workflowRuntime
+  if (rt?.maxConcurrent !== undefined) validate("maxConcurrent", rt.maxConcurrent, 1, "maxConcurrent")
+  if (rt?.maxTotalAgents !== undefined) validate("maxTotalAgents", rt.maxTotalAgents, 0, "maxTotalAgents")
+  if (rt?.maxConcurrentWorkflows !== undefined) validate("maxConcurrentWorkflows", rt.maxConcurrentWorkflows, 1, "maxConcurrentWorkflows")
+  if (rt?.agentTimeout !== undefined) validate("agentTimeout", rt.agentTimeout, 1, "agentTimeout")
+  if (rt?.workflowTimeout !== undefined) validate("workflowTimeout", rt.workflowTimeout, 1, "workflowTimeout")
+  if (rt?.agentRetries !== undefined) validate("agentRetries", rt.agentRetries, 0, "agentRetries")
+  if (rt?.maxJournalFiles !== undefined) validate("maxJournalFiles", rt.maxJournalFiles, 0, "maxJournalFiles")
   return deepFreeze({
     enabled: raw.enabled ?? d.enabled,
     keywordTrigger: raw.keywordTrigger ?? d.keywordTrigger,

@@ -89,6 +89,21 @@ describe("runAgent", () => {
     expect(budget.canSpend()).toBe(false) // one start consumed the single-agent budget
   })
 
+  it("retries when createSession throws (transient), then succeeds", async () => {
+    const mock = createMockSdk()
+    let creates = 0
+    const origCreate = mock.sdk.createSession
+    mock.sdk.createSession = async (pid, title, dir) => {
+      creates++
+      if (creates === 1) throw new Error("network blip")
+      return origCreate(pid, title, dir)
+    }
+    ;(mock.sdk as any).promptSession = run({ text: "ok", cost: 0, tokens: 0 })
+    const result = await runAgent(spec(), "t", opts(mock, { retries: 1 }))
+    expect(result.status).toBe("completed")
+    expect(creates).toBe(2)
+  })
+
   it("passes the worktree directory through to createSession", async () => {
     const mock = createMockSdk()
     ;(mock.sdk as any).promptSession = run({ text: "ok", cost: 0, tokens: 0 })

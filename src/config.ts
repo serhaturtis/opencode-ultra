@@ -10,7 +10,7 @@ import { deepFreeze } from "./freeze.js"
 export function compileConfig(raw: RawOpenCodeUltraConfig): CompiledConfig {
   const warnings: string[] = []
   const autoMode = compileAutoModeConfig(raw.autoMode ?? {}, warnings)
-  const ultracode = compileUltracodeConfig(raw.ultracode ?? {})
+  const ultracode = compileUltracodeConfig(raw.ultracode ?? {}, warnings)
   return deepFreeze({ autoMode, ultracode, warnings: Object.freeze(warnings) })
 }
 
