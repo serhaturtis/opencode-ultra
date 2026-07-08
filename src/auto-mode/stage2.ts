@@ -14,6 +14,7 @@ import {
   type Stage2Classification,
 } from "../contracts.js"
 import { formatBoundaries } from "./boundaries.js"
+import { errMsg } from "../util.js"
 
 // Each call runs in a fresh throwaway session with tools disabled and no history.
 // Must NOT pass noReply — the model must reply with a verdict.
@@ -40,7 +41,7 @@ export class ClassifierSession implements Classifier {
         )
       }
     } catch (err) {
-      this.sdk.log("warn", `could not verify the classifier agent: ${err instanceof Error ? err.message : String(err)}`)
+      this.sdk.log("warn", `could not verify the classifier agent: ${errMsg(err)}`)
     }
   }
 
@@ -54,7 +55,7 @@ export class ClassifierSession implements Classifier {
     } catch (err) {
       // Can't reach the classifier → DEFER to normal permissions (Stage 1 still
       // blocks the catastrophic set), rather than blocking routine work.
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errMsg(err)
       this.sdk.log("warn", `safety classifier unavailable: ${message}. Deferring to normal permissions.`)
       return { verdict: "DEFER", reason: `classifier unavailable: ${message}` }
     }
@@ -75,7 +76,7 @@ export class ClassifierSession implements Classifier {
         config,
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errMsg(err)
       this.sdk.log("warn", `injection detector unavailable: ${message}. Treating as injection.`)
       return true
     }

@@ -120,6 +120,10 @@ export function completeJob(state: UltraState, job: WorkflowJob): void {
   if (state.workflows.jobs.has(job.id)) {
     state.workflows.jobs.delete(job.id)
     const completed = state.workflows.completedJobs
+    // Remove any prior entry with the same id (resume produces a new job with the
+    // same workflowId, so the old completion would otherwise duplicate).
+    const prior = completed.findIndex((j) => j.id === job.id)
+    if (prior !== -1) completed.splice(prior, 1)
     completed.push(job)
     while (completed.length > MAX_COMPLETED_JOBS) completed.shift()
   }

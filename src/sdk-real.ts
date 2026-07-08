@@ -12,6 +12,7 @@
  */
 import type { OpencodeClient } from "@opencode-ai/sdk"
 import type { ISdkClient } from "./sdk-client.js"
+import { errMsg } from "./util.js"
 
 export function createRealSdkClient(client: OpencodeClient): ISdkClient {
   const c = client as any
@@ -73,7 +74,7 @@ export function createRealSdkClient(client: OpencodeClient): ISdkClient {
         // invisibly leaked — but it must never throw, because callers don't
         // expect a throw and a failed delete is a resource leak, not a workflow
         // correctness failure.
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errMsg(err)
         try { c.app?.log?.({ body: { service: "opencode-ultra", level: "warn", message: `session deletion failed for ${sessionId}: ${msg}` } }) } catch {}
       }
     },

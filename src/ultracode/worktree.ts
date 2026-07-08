@@ -17,7 +17,7 @@ import * as fs from "node:fs/promises"
 import * as crypto from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { type AgentResult } from "../contracts.js"
+import { type AgentResult, type WorktreeReclaimer } from "../contracts.js"
 import { slugify, errMsg } from "../util.js"
 
 export interface GitResult { readonly stdout: string; readonly code: number }
@@ -58,7 +58,7 @@ export interface IsolationSession {
   cleanup(log?: (message: string) => void): Promise<void>
 }
 
-export class WorktreeManager {
+export class WorktreeManager implements WorktreeReclaimer {
   /** Every currently-active isolation session this manager opened — for reclamation on teardown. */
   private readonly active = new Set<ActiveHandle>()
 

@@ -29,7 +29,7 @@ import { FileJournal } from "./journal.js"
 import { renderProgress } from "./workflow-manager.js"
 import { WorktreeManager } from "./worktree.js"
 import { completeJob } from "../state.js"
-import { LogMetrics } from "../metrics.js"
+import { errMsg } from "../util.js"
 import { WorkflowLimitError, WorkflowNotFoundError, WorkflowParseError } from "../errors.js"
 
 export function createWorkflowTool(
@@ -227,7 +227,7 @@ function makeJob(
         if ((job.status as string) !== "cancelled") job.status = "completed"
       } catch (err) {
         job.status = "error"
-        job.result = `Workflow failed: ${err instanceof Error ? err.message : String(err)}`
+        job.result = `Workflow failed: ${errMsg(err)}`
       } finally {
         completeJob(state, job)
         // Push the result back into the session so the model is re-engaged with it
@@ -280,7 +280,7 @@ function makeNarrationSink(sdk: ISdkClient, parentSessionId: string): NarrationS
         parts: [{ type: "text", synthetic: true, text: message }],
         noReply: true,
       }).catch((err) => {
-        sdk.log("warn", `workflow narration dropped: ${err instanceof Error ? err.message : String(err)}`)
+        sdk.log("warn", `workflow narration dropped: ${errMsg(err)}`)
       })
     },
   }
@@ -303,7 +303,7 @@ async function notifyCompletion(sdk: ISdkClient, parentSessionId: string, job: W
       noReply: false,
     })
   } catch (err) {
-    sdk.log("warn", `workflow ${job.id} completion notification dropped: ${err instanceof Error ? err.message : String(err)}`)
+    sdk.log("warn", `workflow ${job.id} completion notification dropped: ${errMsg(err)}`)
   }
 }
 

@@ -7,6 +7,7 @@ import * as path from "node:path"
 import * as crypto from "node:crypto"
 import { type Stage, type StageResult, type WorkflowDef } from "../contracts.js"
 import { type LogLevel } from "../sdk-client.js"
+import { errMsg } from "../util.js"
 
 type Log = (level: LogLevel, message: string) => void
 
@@ -54,7 +55,7 @@ export class FileJournal implements Journal {
     // Best-effort GC: cap retained journals so the directory can't grow unbounded.
     // Never throws — a GC failure must not block the workflow from running.
     try { await pruneJournalDir(dir, maxJournalFiles, filePath, log) }
-    catch (err) { log?.("warn", `journal GC failed: ${err instanceof Error ? err.message : String(err)}`) }
+    catch (err) { log?.("warn", `journal GC failed: ${errMsg(err)}`) }
     return new FileJournal(filePath, data, log)
   }
 
@@ -81,7 +82,7 @@ export class FileJournal implements Journal {
       await fs.writeFile(tmp, JSON.stringify(this.data, null, 2), "utf-8")
       await fs.rename(tmp, this.filePath)
     } catch (err) {
-      this.log?.("warn", `could not write workflow journal: ${err instanceof Error ? err.message : String(err)}`)
+      this.log?.("warn", `could not write workflow journal: ${errMsg(err)}`)
     }
   }
 }
@@ -99,7 +100,7 @@ async function readJournal(filePath: string, log?: Log): Promise<JournalFile | u
     // File exists but is corrupt/truncated. Distinguish this from "file not
     // found" so a bit-flipped or partially-written journal doesn't silently
     // masquerade as a missing one, losing all resume progress.
-    log?.("warn", `journal file ${filePath} exists but is not valid JSON (${err instanceof Error ? err.message : String(err)}) — all cached progress lost`)
+    log?.("warn", `journal file ${filePath} exists but is not valid JSON (${errMsg(err)}) — all cached progress lost`)
     return undefined
   }
 }
@@ -133,6 +134,6 @@ async function pruneJournalDir(dir: string, maxFiles: number, keepFile: string, 
     .slice(0, stamped.length - maxFiles)
   for (const { f } of evict) {
     try { await fs.unlink(f) }
-    catch (err) { log?.("warn", `journal GC could not remove '${f}': ${err instanceof Error ? err.message : String(err)}`) }
+    catch (err) { log?.("warn", `journal GC could not remove '${f}': ${errMsg(err)}`) }
   }
 }
