@@ -192,3 +192,49 @@ describe("plugin: session cleanup", () => {
     expect(out.status).toBe("ask")
   })
 })
+
+describe("plugin: command-handler branches", () => {
+  it("/auto status reports active state and denial counts", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "auto", arguments: "status", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("ACTIVE")
+    expect(out.parts[0].text).toContain("Consecutive denials")
+  })
+
+  it("/auto defaults shows the compiled system reminder", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "auto", arguments: "defaults", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("AUTO MODE")
+  })
+
+  it("/auto unknown argument returns help text", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "auto", arguments: "xyz", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("Unknown /auto argument")
+  })
+
+  it("/ultracode status reports session state", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "ultracode", arguments: "status", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("Ultracode mode:")
+    expect(out.parts[0].text).toContain("keyword trigger")
+  })
+
+  it("/ultracode unknown argument returns help text", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "ultracode", arguments: "xyz", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("Unknown /ultracode argument")
+  })
+
+  it("/workflows lists workflows", async () => {
+    const { hooks } = await makePlugin(ENABLED)
+    const out: any = { parts: [] }
+    await hooks["command.execute.before"]({ command: "workflows", arguments: "", sessionID: "s" }, out)
+    expect(out.parts[0].text).toContain("No workflows found")
+  })
+})

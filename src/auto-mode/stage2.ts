@@ -64,8 +64,9 @@ export class ClassifierSession implements Classifier {
 
   /**
    * Confirm whether untrusted content is a prompt-injection attempt. Used to
-   * escalate a regex pre-filter hit. Fails closed (treats as injection on an
-   * unclear/failed check) — but that only adds a warning banner, never blocks.
+   * escalate a regex pre-filter hit. Treats all unclear/failed responses as
+   * injection (conservative) — the result only prepends a warning banner, it
+   * never blocks content from reaching the model.
    */
   async detectInjection(content: string, config: CompiledAutoModeConfig): Promise<boolean> {
     let text: string
