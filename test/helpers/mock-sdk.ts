@@ -22,6 +22,8 @@ export function createMockSdk(): { sdk: ISdkClient; calls: MockCall[] } {
 
     async createSession(parentId, title, directory) {
       calls.push({ method: "createSession", args: [parentId, title, directory] })
+      // Session ID is derived from the total call count — each session gets a unique
+      // id across the test. Not session-count, which would require separate tracking.
       return `session-${calls.length}`
     },
 
