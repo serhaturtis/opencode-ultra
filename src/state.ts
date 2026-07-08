@@ -15,13 +15,17 @@ import {
   type WorkflowState,
   type WorktreeReclaimer,
 } from "./contracts.js"
-import { TtlVerdictCache } from "./auto-mode/verdict-cache.js"
+import { type VerdictCache } from "./contracts.js"
 
 // ── Top-level factory ──────────────────────────────────────────────────────
 
-export function createState(getConfig: () => CompiledConfig, worktrees?: WorktreeReclaimer): UltraState {
+export function createState(
+  getConfig: () => CompiledConfig,
+  worktrees?: WorktreeReclaimer,
+  verdictCacheFactory: (ttlMs: number) => VerdictCache = () => { throw new Error("verdictCacheFactory required") },
+): UltraState {
   return {
-    sessions: createSessionStore(getConfig),
+    sessions: createSessionStore(getConfig, verdictCacheFactory),
     workflows: createWorkflowState(worktrees),
   }
 }
@@ -30,7 +34,7 @@ export function createState(getConfig: () => CompiledConfig, worktrees?: Worktre
 
 const SESSION_TTL_MS = 3600_000 // 1 hour — sessions unreferenced for longer are evicted
 
-function createSessionStore(getConfig: () => CompiledConfig): SessionStore {
+function createSessionStore(getConfig: () => CompiledConfig, verdictCacheFactory: (ttlMs: number) => VerdictCache): SessionStore {
   const sessions = new Map<string, SessionState>()
   let lastSweep = Date.now()
   const maybeSweep = () => {
@@ -43,7 +47,7 @@ function createSessionStore(getConfig: () => CompiledConfig): SessionStore {
       let state = sessions.get(sessionID)
       if (!state) {
         maybeSweep()
-        state = createSessionState(getConfig())
+        state = createSessionState(getConfig(), verdictCacheFactory)
         sessions.set(sessionID, state)
       }
       return state
@@ -59,7 +63,7 @@ function evictExpired(sessions: Map<string, SessionState>, now: number, ttlMs: n
   }
 }
 
-function createSessionState(config: CompiledConfig): SessionState {
+function createSessionState(config: CompiledConfig, verdictCacheFactory: (ttlMs: number) => VerdictCache): SessionState {
   const auto = config.autoMode
   return {
     createdAt: Date.now(),
@@ -71,7 +75,7 @@ function createSessionState(config: CompiledConfig): SessionState {
       totalDenials: 0,
       lastUserMessage: "",
       boundaries: [],
-      verdicts: new TtlVerdictCache(auto.classifier.cacheTtlMs),
+      verdicts: verdictCacheFactory(auto.classifier.cacheTtlMs),
     },
     ultracode: {
       active: config.ultracode.enabled,

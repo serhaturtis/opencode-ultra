@@ -59,6 +59,7 @@ export function createRealSdkClient(client: OpencodeClient): ISdkClient {
       const info = res?.data?.info ?? res?.info
       const parts = res?.data?.parts ?? res?.parts ?? []
       const text = parts.find((p: { type: string; text?: string }) => p.type === "text")?.text ?? ""
+      if (!text) throw new Error("session.prompt returned no text part (malformed SDK response)")
       const t = info?.tokens
       const tokens = t ? (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0) : 0
       return { text, cost: info?.cost ?? 0, tokens }

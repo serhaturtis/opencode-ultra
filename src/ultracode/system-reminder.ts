@@ -23,7 +23,7 @@ export function buildUltracodeReminder(): string {
     "",
     "Process:",
     "  1. workflow({ action: \"validate\", definition }) — review preview, agents, cost.",
-    "  2. workflow({ action: \"execute\", workflowId }) — runs in the background.",
+    "  2. workflow({ action: \"execute\", definition }) — validate + start in the background (same definition as step 1).",
     "  3. Use the workflow-manager tool for live progress / pause / resume / stop / save.",
     "",
     "Prefer a verify stage for audits and reviews — it removes plausible-but-wrong",

@@ -86,7 +86,7 @@ describe("validateTemplates", () => {
   it("rejects an agent reference into a verify stage (ENG-TM-08: dynamic voter names)", () => {
     const def: WorkflowDef = { title: "", stages: [
       { kind: "fanout", name: "find", agents: [{ name: "f", task: "find", agent: "explore" }] },
-      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1 },
+      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1, refuteThreshold: 1 },
       { kind: "fanout", name: "use", agents: [{ name: "u", task: "{{stage.refute.anything}}", agent: "general" }] },
     ] }
     const errs = validateTemplates(def)
@@ -96,7 +96,7 @@ describe("validateTemplates", () => {
   it("still allows a 2-part {{stage.<verify>}} summary reference", () => {
     const def: WorkflowDef = { title: "", stages: [
       { kind: "fanout", name: "find", agents: [{ name: "f", task: "find", agent: "explore" }] },
-      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1 },
+      { kind: "verify", name: "refute", source: "find", task: "{{finding}}", agent: "general", voters: 1, refuteThreshold: 1 },
       { kind: "fanout", name: "use", agents: [{ name: "u", task: "survivors: {{stage.refute}}", agent: "general" }] },
     ] }
     expect(validateTemplates(def)).toEqual([])

@@ -20,6 +20,7 @@ import { createWorkflowManagerTool } from "../../src/ultracode/workflow-manager"
 import { WorktreeManager } from "../../src/ultracode/worktree"
 import { createState } from "../../src/state"
 import { compileConfig } from "../../src/config"
+import { TtlVerdictCache } from "../../src/auto-mode/verdict-cache"
 import { createMockSdk } from "../helpers/mock-sdk"
 import type { CompiledConfig, UltraState } from "../../src/contracts"
 
@@ -43,7 +44,7 @@ describe("workflow tool — validate/execute contract", () => {
     config = compileConfig({ ultracode: { enabled: true } })
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-tool-"))
     worktrees = new WorktreeManager(projectDir)
-    state = createState(() => config, worktrees)
+    state = createState(() => config, worktrees, (ttlMs) => new TtlVerdictCache(ttlMs))
     wf = createWorkflowTool(createMockSdk().sdk, state, () => config, projectDir, worktrees)
     mgr = createWorkflowManagerTool(state)
   })

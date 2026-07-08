@@ -11,8 +11,8 @@ import { type Stage1Verdict, type Stage1Rule } from "../contracts.js"
 
 // ── Classification ───────────────────────────────────────────────────────────
 
-/** Shell control operators that chain, redirect, or substitute commands. */
-const SHELL_CONTROL_OPERATORS = /[|<>;&`]|\$\(/
+/** Shell control operators that chain, redirect, or substitute commands — including newline. */
+const SHELL_CONTROL_OPERATORS = /[|<>;&`\n]|\$\(/
 
 const SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "shell"])
 

@@ -62,7 +62,7 @@ describe("WorkflowExecutor.execute", () => {
       return { text: '{"findings":[{"id":"f1","desc":"maybe a bug"}]}', cost: 0, tokens: 0 }
     }
     const def: WorkflowDef = { title: "T", stages: [
-      { kind: "fanout", name: "find", agents: [{ name: "finder", task: "find bugs", agent: "explore", schema: { fields: { findings: { type: "array", required: true, items: { fields: { id: { type: "string" } } } } } } }] },
+      { kind: "fanout", name: "find", agents: [{ name: "finder", task: "find bugs", agent: "explore", schema: { fields: { findings: { type: "array" as const, required: true, items: { fields: { id: { type: "string" as const } } } } } } }] },
       { kind: "verify", name: "check", source: "find", task: "REFUTE this finding: {{finding}}", agent: "general", voters: 1, refuteThreshold: 1 },
     ] }
     const { results } = await exec(def)
@@ -77,7 +77,7 @@ describe("WorkflowExecutor.execute", () => {
     }
     const def: WorkflowDef = { title: "T", stages: [{
       kind: "loop", name: "sweep", maxIterations: 5, dedupeKey: "id",
-      body: { kind: "fanout", name: "round", agents: [{ name: "f", task: "find", agent: "explore", schema: { fields: { findings: { type: "array", required: true, items: { fields: { id: { type: "string" } } } } } } }] },
+      body: { kind: "fanout", name: "round", agents: [{ name: "f", task: "find", agent: "explore", schema: { fields: { findings: { type: "array" as const, required: true, items: { fields: { id: { type: "string" as const } } } } } } }] },
     }] }
     const { results } = await exec(def)
     expect(results.sweep!.findings).toHaveLength(1) // deduped across iterations
@@ -95,7 +95,7 @@ describe("WorkflowExecutor.execute", () => {
       gen += 1 // unique id per round → loop runs to maxIterations (2), accumulating two 'gen' agents
       return { text: `{"findings":[{"id":"iter${gen}"}]}`, cost: 0, tokens: 0 }
     }
-    const schema = { fields: { findings: { type: "array", required: true, items: { fields: { id: { type: "string" } } } } } }
+    const schema = { fields: { findings: { type: "array" as const, required: true, items: { fields: { id: { type: "string" as const } } } } } }
     const def: WorkflowDef = { title: "T", stages: [
       { kind: "loop", name: "sweep", maxIterations: 2, dedupeKey: "id",
         body: { kind: "fanout", name: "round", agents: [{ name: "gen", task: "find", agent: "explore", schema }] } },

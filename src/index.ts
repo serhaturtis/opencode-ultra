@@ -9,6 +9,7 @@ import { type CompiledConfig, type RawOpenCodeUltraConfig, type SessionState } f
 import { type ISdkClient } from "./sdk-client.js"
 import { createRealSdkClient } from "./sdk-real.js"
 import { ClassifierSession } from "./auto-mode/stage2.js"
+import { TtlVerdictCache } from "./auto-mode/verdict-cache.js"
 import { WorktreeManager } from "./ultracode/worktree.js"
 import { createWorkflowTool } from "./ultracode/workflow-tool.js"
 import { createWorkflowManagerTool } from "./ultracode/workflow-manager.js"
@@ -30,7 +31,7 @@ export default (async function opencodeUltra(input, options) {
   for (const w of config.warnings) sdk.log("warn", w)
 
   const worktrees = new WorktreeManager(directory)
-  const state = createState(() => config, worktrees)
+  const state = createState(() => config, worktrees, (ttlMs) => new TtlVerdictCache(ttlMs))
   const classifier = new ClassifierSession(sdk)
   const metrics = new LogMetrics(sdk)
 

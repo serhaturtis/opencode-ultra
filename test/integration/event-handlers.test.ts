@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest"
 import { onEvent, onCompacting, onDispose } from "../../src/hooks/event-handlers"
 import { createState } from "../../src/state"
 import { compileConfig } from "../../src/config"
+import { TtlVerdictCache } from "../../src/auto-mode/verdict-cache"
 import type { PluginContext } from "../../src/hooks/context"
 
 function makeCtx(overrides: Partial<PluginContext> = {}): PluginContext {
   const base = compileConfig({ autoMode: { enabled: true, defaultMode: true }, ultracode: { enabled: true } })
-  const state = createState(() => base)
+  const state = createState(() => base, undefined, (ttlMs) => new TtlVerdictCache(ttlMs))
   const sdk = { log(_l: string, _m: string) {} } as PluginContext["sdk"]
   return { sdk, state, config: base, directory: "/tmp", worktrees: { cleanupAllActive: async () => {} }, classifier: {} as any, metrics: { agentCompleted() {}, agentFailed() {}, stageCompleted() {}, workflowCompleted() {}, autoClassification() {}, autoDenied() {} }, ...overrides }
 }

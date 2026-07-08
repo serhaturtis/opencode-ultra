@@ -9,6 +9,7 @@ import * as path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import { type ISdkClient } from "../sdk-client.js"
 import {
+  type BudgetReport,
   type CompiledConfig,
   type Metrics,
   type NarrationSink,
@@ -172,8 +173,11 @@ async function handleResume(
 
 function enforceConcurrency(state: UltraState, config: CompiledConfig): void {
   const max = config.ultracode.workflowRuntime.maxConcurrentWorkflows
-  const running = [...state.workflows.jobs.values()].filter((j) => j.status === "running").length
-  if (running >= max) throw new WorkflowLimitError(max, running)
+  // Count running AND pending (not just running) — a pending job is about to flip
+  // to running, so counting it prevents the check-then-act race where two execute
+  // calls both pass the gate before either sets status to "running".
+  const active = [...state.workflows.jobs.values()].filter((j) => j.status === "running" || j.status === "pending").length
+  if (active >= max) throw new WorkflowLimitError(max, active)
 }
 
 // ── Job factory ──────────────────────────────────────────────────────────────
@@ -210,7 +214,7 @@ function makeJob(
     execute: async () => {
       job.status = "running"
       const rt = config.ultracode.workflowRuntime
-      const budget = new Budget(rt.maxCostUsd, rt.maxTotalAgents, rt.agentCostCapUsd)
+      const budget = job.budget ? restoreBudget(rt, job.budget) : new Budget(rt.maxCostUsd, rt.maxTotalAgents, rt.agentCostCapUsd)
       try {
         const journal = await FileJournal.open(path.join(projectDir, config.ultracode.journalDir), id, def, (l, m) => sdk.log(l, m), rt.maxJournalFiles)
         const { summary } = await executor.execute(def, { control, progress, budget, metrics, journal, worktrees })
@@ -276,6 +280,14 @@ function makeNarrationSink(sdk: ISdkClient, parentSessionId: string): NarrationS
       })
     },
   }
+}
+
+/** Restore budget from a prior run's report so a resumed workflow respects cumulative spend. */
+function restoreBudget(rt: CompiledConfig["ultracode"]["workflowRuntime"], report: BudgetReport): Budget {
+  const b = new Budget(rt.maxCostUsd, rt.maxTotalAgents, rt.agentCostCapUsd)
+  // Replay the prior spend so the cap accounts for what was already consumed.
+  b.record(report.spentUsd, report.spentTokens)
+  return b
 }
 
 /** Re-engage the parent session on completion. Drops logged. */
