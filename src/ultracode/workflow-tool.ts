@@ -52,6 +52,8 @@ Do NOT call workflow-manager to poll; while a workflow runs it returns nothing u
 
 definition is JSON: { "title": "...", "stages": [ ... ] }. Stage kinds:
 - fanout:   { kind, name, agents: [{ name, task, agent: "general"|"explore", schema? }], maxConcurrent?, isolate? }
+  Use \"explore\" for finder/data-gathering agents (read-only, fast, no sub-workflow risk).
+  Use \"general\" for reasoning, verification, and synthesis tasks.
 - pipeline: { kind, name, over: ["a","b"], steps: [{ name, task, agent }] }   // per-item, no barrier; tasks see {{item}}, {{step.X}}
 - verify:   { kind, name, source: "<stage>", task, agent, voters, refuteThreshold?, lenses? }  // task sees {{finding}}
 - loop:     { kind, name, body: <fanout>, maxIterations, dedupeKey }            // repeats until no new findings

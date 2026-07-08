@@ -18,6 +18,8 @@ export function buildUltracodeReminder(): string {
     "",
     "Pass results forward with {{stage.<name>}} / {{stage.<name>.<agent>}}.",
     "Give finder agents a `schema` so findings are structured; verify/loop consume them.",
+    "Use `explore` agent type for data-gathering/finder tasks (read-only, fast, no tools).",
+    "Use `general` agent type for reasoning, verification, and synthesis.",
     "",
     "Process:",
     "  1. workflow({ action: \"validate\", definition }) — review preview, agents, cost.",
@@ -27,5 +29,10 @@ export function buildUltracodeReminder(): string {
     "Prefer a verify stage for audits and reviews — it removes plausible-but-wrong",
     "findings. Don't use workflows for single-file edits, simple questions, or",
     "purely conversational requests.",
+    "",
+    "CRITICAL: agents running INSIDE a workflow stage (finders, verifiers, pipeline",
+    "steps) must do their work DIRECTLY — read files, run grep, produce output.",
+    "Do NOT spawn sub-workflows from within a workflow stage. The workflow tool is",
+    "for the orchestrator, not for worker agents.",
   )
 }
