@@ -28,13 +28,12 @@ describe("probe: isUntrustedSource", () => {
     expect(isUntrustedSource("some_custom_tool", {}, dir)).toBe(true)
   })
 
-  it("treats vetted local tools as trusted; bash is untrusted (can fetch external content)", () => {
-    for (const tool of ["grep", "glob", "edit", "write", "apply_patch", "todowrite", "lsp", "task"]) {
+  it("treats vetted local tools as trusted; bash and task are untrusted", () => {
+    for (const tool of ["grep", "glob", "edit", "write", "apply_patch", "todowrite", "lsp"]) {
       expect(isUntrustedSource(tool, { command: "ls" }, dir)).toBe(false)
     }
-    // AM-05: bash output is now probed — shell commands can curl/wget external
-    // content that an injection attacker controls.
     expect(isUntrustedSource("bash", { command: "ls" }, dir)).toBe(true)
+    expect(isUntrustedSource("task", { description: "test", subagent_type: "general", prompt: "test" }, dir)).toBe(true)
   })
 
   it("treats in-project reads as trusted, out-of-project reads as untrusted", () => {

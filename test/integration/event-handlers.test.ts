@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { onEvent, onCompacting, onDispose } from "../../src/hooks/event-handlers"
+import { onSystemTransform } from "../../src/hooks/chat-handlers"
 import { createState } from "../../src/state"
 import { compileConfig } from "../../src/config"
 import { TtlVerdictCache } from "../../src/auto-mode/verdict-cache"
@@ -73,5 +74,37 @@ describe("onDispose", () => {
     ctx.state.workflows.jobs.set("w1", job)
     await onDispose(ctx)
     expect(ctx.state.workflows.jobs.size).toBe(0)
+  })
+})
+
+describe("onSystemTransform", () => {
+  it("appends reminders when auto mode is active", () => {
+    const ctx = makeCtx()
+    const ses = ctx.state.sessions.get("s")
+    ses.autoMode.active = true
+    ses.autoMode.paused = false
+    ses.ultracode.active = true
+    const out = { system: [] as string[] }
+    onSystemTransform(ctx as any, { sessionID: "s", model: {} as any } as any, out as any)
+    expect(out.system.length).toBe(1) // joined into one string
+    expect(out.system[0]).toContain("AUTO MODE")
+    expect(out.system[0]).toContain("ULTRACODE")
+  })
+
+  it("shows paused reminder when auto mode is paused", () => {
+    const ctx = makeCtx()
+    const ses = ctx.state.sessions.get("s")
+    ses.autoMode.active = true
+    ses.autoMode.paused = true
+    const out = { system: [] as string[] }
+    onSystemTransform(ctx as any, { sessionID: "s", model: {} as any } as any, out as any)
+    expect(out.system[0]).toContain("PAUSED")
+  })
+
+  it("does nothing when sessionID is missing", () => {
+    const ctx = makeCtx()
+    const out = { system: [] as string[] }
+    onSystemTransform(ctx as any, {} as any, out as any)
+    expect(out.system).toHaveLength(0)
   })
 })

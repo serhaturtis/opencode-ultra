@@ -127,7 +127,7 @@ async function pruneJournalDir(dir: string, maxFiles: number, keepFile: string, 
       catch { return { f: p, mtime: Number.POSITIVE_INFINITY } as const } // keep files we can't stat
     }),
   )
-  // Evict oldest until we're at the cap; always preserve keepFile + any *.tmp.
+  // Evict oldest until we're at the cap; the keepFile is always preserved.
   const evict = stamped
     .filter((s) => s.f !== keepFile)
     .sort((a, b) => a.mtime - b.mtime)
