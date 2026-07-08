@@ -1,3 +1,5 @@
+import { sleepUntil } from "../util.js"
+
 /** Controls polled between items so pause/stop/timeout take effect mid-stage. */
 export interface CooperativeGate {
   readonly shouldStop?: () => boolean
@@ -18,9 +20,7 @@ export async function runBounded<T, R>(
   async function lane(): Promise<void> {
     while (true) {
       if (gate.shouldStop?.()) return
-      while (gate.isPaused?.() && !gate.shouldStop?.()) {
-        await new Promise((r) => setTimeout(r, 200))
-      }
+      if (gate.isPaused) await sleepUntil(() => !gate.isPaused!(), gate.shouldStop)
       if (gate.shouldStop?.() || gate.hasTimedOut?.()) return
       const index = next++
       if (index >= items.length) return

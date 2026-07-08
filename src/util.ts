@@ -12,3 +12,14 @@ export function systemReminder(...lines: string[]): string {
 export function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/** Poll a condition at 200ms intervals, sleeping in between. */
+export function sleepUntil(condition: () => boolean, abort?: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (condition() || abort?.()) { resolve(); return }
+      setTimeout(check, 200)
+    }
+    check()
+  })
+}

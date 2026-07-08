@@ -32,6 +32,7 @@ import { Budget } from "./budget.js"
 import { type Journal, chainStageHash } from "./journal.js"
 import { type WorktreeManager } from "./worktree.js"
 import { errMsg } from "../util.js"
+import { sleepUntil } from "../util.js"
 
 const VERDICT_SCHEMA: OutputSchema = {
   fields: { refuted: { type: "boolean", required: true }, reason: { type: "string" } },
@@ -249,8 +250,8 @@ export class WorkflowExecutor {
     return opts.worktrees.begin(stage.name, stage.agents.map((a) => a.name))
   }
 
-  private async waitWhilePaused(control: WorkflowControl): Promise<void> {
-    while (control.isPaused?.() && !control.shouldStop?.()) { await new Promise((r) => setTimeout(r, 200)) }
+   private async waitWhilePaused(control: WorkflowControl): Promise<void> {
+    if (control.isPaused) await sleepUntil(() => !control.isPaused!(), control.shouldStop)
   }
 
   private timedOut(startedAt: number | null, control: WorkflowControl): boolean {

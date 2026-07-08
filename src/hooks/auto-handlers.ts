@@ -27,12 +27,15 @@ export async function onToolBefore(
   const { tool, callID } = input
   if (isToolAlwaysSafe(tool)) return
 
-  const params = extractActionString(tool, output.args)
-  const verdict = await resolveVerdict(tool, params, output.args, ctx.config, auto, ctx.classifier, ctx.sdk, ctx.metrics)
+  const stage2Params = extractActionString(tool, output.args)
+  // Cache key is path-only for write tools — truncating content produced
+  // cache-key collisions where distinct writes inherited prior verdicts.
+  const cacheKey = extractCacheKey(tool, output.args)
+  const verdict = await resolveVerdict(tool, cacheKey, stage2Params, output.args, ctx.config, auto, ctx.classifier, ctx.sdk, ctx.metrics)
 
   if (verdict.verdict === "DEFER") return
 
-  auto.verdicts.record(tool, params, callID, { verdict: verdict.verdict, reason: verdict.reason })
+  auto.verdicts.record(tool, cacheKey, callID, { verdict: verdict.verdict, reason: verdict.reason })
   applyCounters(auto, ctx.config, verdict.verdict)
 
   if (verdict.verdict === "DENY") {
@@ -84,7 +87,8 @@ export function onPermissionAsk(
 
 async function resolveVerdict(
   tool: string,
-  params: string,
+  cacheKey: string,
+  stage2Params: string,
   args: unknown,
   config: CompiledConfig,
   auto: AutoModeState,
@@ -92,7 +96,7 @@ async function resolveVerdict(
   sdk: ISdkClient,
   metrics: Metrics,
 ): Promise<Stage2Classification> {
-  const cached = auto.verdicts.lookup(tool, params)
+  const cached = auto.verdicts.lookup(tool, cacheKey)
   if (cached) return cached
 
   const t0 = Date.now()
@@ -104,7 +108,7 @@ async function resolveVerdict(
   }
 
   const result = await classifier.classify(
-    { tool, params, userMessage: auto.lastUserMessage, boundaries: auto.boundaries },
+    { tool, params: stage2Params, userMessage: auto.lastUserMessage, boundaries: auto.boundaries },
     config.autoMode,
   )
   metrics.autoClassification(result.verdict, tool, "stage2", Date.now() - t0)
@@ -116,5 +120,16 @@ function applyCounters(auto: AutoModeState, config: CompiledConfig, verdict: Fin
     recordDenial(auto, config.autoMode.maxConsecutiveDenials, config.autoMode.maxTotalDenials)
   } else {
     recordApproval(auto)
+  }
+}
+
+/** Cache key — path-only for writes so distinct writes to the same file share a verdict. */
+function extractCacheKey(tool: string, args: unknown): string {
+  if (typeof args !== "object" || args === null) return ""
+  switch (tool) {
+    case "write": case "edit": case "apply_patch":
+      return `${tool}:${typeof (args as Record<string,unknown>).filePath === "string" ? (args as Record<string,unknown>).filePath : ""}`
+    default:
+      return extractActionString(tool, args)
   }
 }

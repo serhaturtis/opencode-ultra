@@ -6,6 +6,7 @@
  * execution. Each job owns its live progress, budget, and resume journal.
  */
 import * as path from "node:path"
+import { randomUUID } from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 import { type ISdkClient } from "../sdk-client.js"
 import {
@@ -104,7 +105,7 @@ function parseAndValidate(
   const { result: partial, def } = validator.validate(parsed)
   if (!partial.valid || !def) return { invalid: output("Workflow validation: INVALID", formatValidation(partial)) }
   // The id is a job-level concern (the tool layer), not a validation concern.
-  const result: ValidationResult = { ...partial, id: crypto.randomUUID().slice(0, 8) }
+  const result: ValidationResult = { ...partial, id: randomUUID().slice(0, 8) }
   return { result, def }
 }
 
